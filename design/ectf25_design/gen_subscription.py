@@ -13,10 +13,36 @@ Copyright: Copyright (c) 2025 The MITRE Corporation
 import argparse
 import json
 from pathlib import Path
-import struct
+import hashlib
 
 from loguru import logger
 
+def stone(totient, base, location):
+    res = base
+    for iter in range(location):
+        res *= res
+        res %= totient
+    return res 
+
+def wind(key, distance, exponent, modulus, totient):
+    # First, we generate the exponent to the key.
+    key_exp = 1
+    bit_position = 0
+    bit = 1
+    while bit <= distance:
+        if bit & distance > 0:
+            key_exp *= stone(totient, exponent, bit_position)
+            key_exp %= totient
+        bit *= 2
+        bit_position += 1
+    # Then, we just return the power.
+    return pow(key, key_exp, modulus)
+
+def pack_stones(stones):
+    res = b""
+    for stone in stones:
+        res += stone.to_bytes(64, byteorder="big")
+    return res
 
 def gen_subscription(
     secrets: bytes, device_id: int, start: int, end: int, channel: int
@@ -31,20 +57,37 @@ def gen_subscription(
     :param end: Last timestamp the subscription is valid for
     :param channel: Channel to enable
     """
-    # TODO: Update this function to provide a Decoder with whatever data it needs to
-    #   subscribe to a new channel
-
-    # Load the json of the secrets file
     secrets = json.loads(secrets)
 
-    # You can use secrets generated using `gen_secrets` here like:
-    # secrets["some_secrets"]
-    # Which would return "EXAMPLE" in the reference design.
-    # Please note that the secrets are READ ONLY at this sage!
+    modulus = secrets["modulus"]
+    totient = secrets["totient"]
+    exponent = secrets["exponent"]
 
+    forward = secrets["sub" + channel]["forward"]
+    backward = secrets["sub" + channel]["backward"]
+
+    b_root = 2 ** 64 - 1
+    b_dist = b_root - end
+
+    # First, we should make the stepping stones using the totient.
+
+    stones = []
+    for l in range(4, 64, 4):
+        stones.append(stone(totient, exponent, l))
+
+
+    # Now, we wind forward the root keys to the correct position.
+    f = wind(forward, start, exponent, modulus, totient)
+    b = wind(backward, b_dist, exponent, modulus, totient)
+
+    h_id = sha3_512(device_id)
+    b_hashed = b ^ h_id
+    # Finally, we pack this like follows:
+    
     # Pack the subscription. This will be sent to the decoder with ectf25.tv.subscribe
-    return struct.pack("<IQQI", device_id, start, end, channel)
-
+    return f.to_bytes(64, byteorder='big') + b_hashed.to_bytes(64, byteorder='big') + \
+        modulus.to_bytes(64, byteorder='big') + pack_stones(stones) + channel.to_bytes(4, byteorder='big') + \
+        start.to_bytes(8, byteorder='big') + end.to_bytes(8, byteorder='big')
 
 def parse_args():
     """Define and parse the command line arguments
