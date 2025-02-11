@@ -13,7 +13,6 @@ Copyright: Copyright (c) 2025 The MITRE Corporation
 import argparse
 import json
 from pathlib import Path
-import struct
 import hashlib
 
 from loguru import logger
@@ -38,6 +37,12 @@ def wind(key, distance, exponent, modulus, totient):
         bit_position += 1
     # Then, we just return the power.
     return pow(key, key_exp, modulus)
+
+def pack_stones(stones):
+    res = b""
+    for stone in stones:
+        res += stone.to_bytes(64, byteorder="big")
+    return res
 
 def gen_subscription(
     secrets: bytes, device_id: int, start: int, end: int, channel: int
@@ -80,8 +85,9 @@ def gen_subscription(
     # Finally, we pack this like follows:
     
     # Pack the subscription. This will be sent to the decoder with ectf25.tv.subscribe
-    return struct.pack(f, b_hashed, modulus, *stones, channel, start, end)
-
+    return f.to_bytes(64, byteorder='big') + b_hashed.to_bytes(64, byteorder='big') + \
+        modulus.to_bytes(64, byteorder='big') + pack_stones(stones) + channel.to_bytes(4, byteorder='big') + \
+        start.to_bytes(8, byteorder='big') + end.to_bytes(8, byteorder='big')
 
 def parse_args():
     """Define and parse the command line arguments
