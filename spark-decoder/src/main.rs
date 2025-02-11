@@ -2,8 +2,14 @@
 #![no_main]
 
 pub extern crate max7800x_hal as hal;
+use core::ffi::c_void;
+
+use crypto_bigint::modular;
+use crypto_bigint::BitOps;
+use crypto_bigint::Uint;
 pub use hal::pac;
 pub use hal::entry;
+use crypto_bigint::U512;
 
 // pick a panicking behavior
 use panic_halt as _; // you can put a breakpoint on `rust_begin_unwind` to catch panics
@@ -74,4 +80,61 @@ fn main() -> ! {
         led_b.set_low();
         delay.delay_ms(500);
     }
+}
+
+
+pub struct Subscription {
+    mem_location: *const c_void,
+    forward_enc: Uint<8>,
+    backward_enc: Uint<8>,
+    n: crypto_bigint::Odd<U512>,
+    e: U512,
+    refs: [U512; 16]
+}
+
+impl Subscription {
+    fn get_ref_exponent(&self, idx: u64, decoder_id: u32) -> &Uint<8> {
+
+    }
+
+    fn get_forward_key(&self) -> U512 {
+        self.forward_enc
+    }
+
+    fn forward_key_shift(&mut self, frames: u64) {
+        let mut bit: u64 = 0;
+        let mut forward : modular::MontyForm<8> = modular::MontyForm::<8>::new(&self.forward_enc,
+            modular::MontyParams::<8>::new(self.n));
+        while (1 << bit) < frames && bit < 64 {
+            if (1 << bit) & frames != 0 {
+                forward = forward.pow_bounded_exp(self.get_ref_exponent(bit, get_id()), 64);
+            }
+            bit += 1;
+        }
+        self.forward_enc = forward.retrieve()
+    }
+
+    fn get_backward_key(&self, decoder_id: u32) -> U512 {
+        self.backward | hal::pac::
+    }
+
+    fn backward_key_shift(&self, frames: u64) {
+        let mut bit: u64 = 0;
+        let mut backward :  modular::MontyForm<8> =modular::MontyForm::<8>::new(&self.get_backward_key(get_id()),
+            modular::MontyParams::<8>::new(self.n));
+        while (1 << bit) < frames && bit < 64 {
+            if (1<<bit) & frames != 0 {
+                backward = backward.pow_bounded_exp(self.get_ref_exponent(bit, get_id()), 64);
+            }
+            bit += 1;
+        }
+    }
+
+    fn get_timestamps(&self) -> (u64, u64) {
+
+    }
+}
+
+fn get_id() -> u32 {
+    0 //TODO: fix
 }
