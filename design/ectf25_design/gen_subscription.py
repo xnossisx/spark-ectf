@@ -19,7 +19,7 @@ from loguru import logger
 
 def stone(totient, base, location):
     res = base
-    for iter in range(location):
+    for _ in range(location):
         res *= res
         res %= totient
     return res 
