@@ -4,26 +4,22 @@ authors = ["bruberu, xnossisx, Garrick-Pkwy, xXThr0wnshadeXx"]
 edition = "2021"
 publish = false
 
-[package.metadata.docs.rs]
+[build]
 targets = ["thumbv7em-none-eabi"]
 
-[profile.dev]
-panic ="abort"
-
 [profile.release]
-panic ="abort"
-
-[profile.test]
-panic ="abort"
+strip=true
+opt-level = "z"
+lto=true
+codegen-units = 1
+panic = "abort"
 
 [dependencies]
 cortex-m = { version = "0.7.7", features = ["critical-section-single-core"] }
-embedded-hal-nb = "1.0.0"
-embedded-io = "0.6.1"
 max7800x-hal = "0.6.1"
-# panic-halt = "1.0.0"
-rand = { version = "0.9.0", default-features = false }
-rug = "1.27.0"
+panic-halt = "1.0.0"
+rug = { version = "1.27.0", features = ["integer"], default-features = false }
+
 
 # Uncomment if you want to use semihosting,
 # cortex-m-semihosting = "0.5"

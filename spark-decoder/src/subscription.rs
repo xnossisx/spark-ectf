@@ -1,5 +1,5 @@
 use core::ffi::c_void;
-use core::ops::{BitXor, BitXorAssign};
+use core::ops::BitXorAssign;
 use rug::Integer;
 use crate::get_id;
 
@@ -21,9 +21,9 @@ impl Subscription {
         Integer::from(&self.refs[relevant as usize])
     }
 
-    fn get_forward_key(&self) -> Integer {
+    /*fn get_forward_key(&self) -> Integer {
         Integer::from(&self.forward_enc | get_id())
-    }
+    }*/
 
     fn forward_key_shift(&mut self, frames: u64) {
         let mut forward_new = Integer::from(&self.forward_enc);
@@ -32,9 +32,9 @@ impl Subscription {
         self.start += frames;
     }
 
-    fn get_backward_key(&self) -> Integer {
+    /*fn get_backward_key(&self) -> Integer {
         Integer::from(&self.backward_enc | get_id())
-    }
+    }*/
 
     fn backward_key_shift(&mut self, frames: u64) -> Integer {
         let mut backward_new = Integer::from(&self.backward_enc);

@@ -22,10 +22,6 @@ pub fn init(uart0:Uart0, reg: &mut GcrRegisters, rx_pin: Pin<0, 0, Af1>, tx_pin:
             .build();
     }
 }
-pub fn write_err(bytes: &[u8]) -> Result<(), &[u8]> {
-    write_console(bytes);
-    Err(bytes)
-}
 
 pub fn write_console(bytes: &[u8]) {
     unsafe {

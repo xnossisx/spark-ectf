@@ -38,7 +38,7 @@ fn main() {
     // See https://github.com/rust-embedded/cortex-m-quickstart/pull/95
     println!("cargo:rustc-link-arg=-n");
 
-    //println!("cargo:rustc-link-arg=-nostartfiles");
+    println!("cargo:rustc-link-arg=-nostartfiles");
 
     // Set the linker script to the one provided by cortex-m-rt.
     println!("cargo:rustc-link-arg=-Tlink.x");

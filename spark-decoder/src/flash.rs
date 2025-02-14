@@ -3,7 +3,6 @@ use hal::flc::FlashError;
 use hal::gcr::clocks::SystemClockResults;
 use hal::pac::Peripherals;
 use crate::pac::Flc;
-use crate::console::write_err;
 use core::result::Result::Err;
 
 static mut FLASH_HANDLE: *mut hal::flc::Flc = null_mut();
@@ -20,7 +19,7 @@ pub fn init(p: Flc, clks: SystemClockResults) {
 
 fn read_bytes(frm: u32, dst: &mut [u8], len: usize) -> Result<(), &[u8]> {
     if dst.len() < len {
-        return Err(b"Insufficient space for destination\n")
+        return Err(b"FlashError::LowSpace")
     }
     unsafe {
         for i in 0..len / 16 { // For 128-bit addresses
