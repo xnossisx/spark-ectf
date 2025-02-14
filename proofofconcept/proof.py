@@ -1,7 +1,8 @@
 import rsa
 import random
 import time
-from gmpy2 import mpz, powmod
+import gmpy2
+from gmpy2.gmpy2 import mpz, powmod
 
 (public, private) = rsa.newkeys(1024)
 

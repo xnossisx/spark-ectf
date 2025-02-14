@@ -11,3 +11,5 @@ target/
 
 # Visual Studio Code workspace settings
 .vscode/
+
+.idea/
