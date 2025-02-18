@@ -1,9 +1,7 @@
-use core::ptr::null_mut;
-use hal::flc::FlashError;
-use hal::gcr::clocks::SystemClockResults;
-use hal::pac::Peripherals;
 use crate::pac::Flc;
+use core::ptr::null_mut;
 use core::result::Result::Err;
+use hal::gcr::clocks::SystemClockResults;
 
 static mut FLASH_HANDLE: *mut hal::flc::Flc = null_mut();
 
@@ -17,16 +15,17 @@ pub fn init(p: Flc, clks: SystemClockResults) {
     }
 }
 
-fn read_bytes(frm: u32, dst: &mut [u8], len: usize) -> Result<(), &[u8]> {
+pub fn read_bytes(frm: u32, dst: &mut [u8], len: usize) -> Result<(), &[u8]> {
     if dst.len() < len {
-        return Err(b"FlashError::LowSpace")
+        return Err(b"FlashError::LowSpace");
     }
     unsafe {
-        for i in 0..len / 16 { // For 128-bit addresses
+        for i in 0..len / 16 {
+            // For 128-bit addresses
             if (dst.as_ptr() as i32) & 0b11 != 0 {
                 return Err(b"FlashError::InvalidAddress");
             }
-            let addr_128_ptr = ((frm as usize) +i*16) as u32;
+            let addr_128_ptr = ((frm as usize) + i * 16) as u32;
             // Safety: We have checked the address already
             unsafe {
                 // Test that unwrap_or_else works correctly
@@ -34,7 +33,7 @@ fn read_bytes(frm: u32, dst: &mut [u8], len: usize) -> Result<(), &[u8]> {
                 if res.is_err() {
                     return Err(b"FlashError::ReadFailed");
                 }
-                *(((dst.as_ptr() as usize + i*16)) as *mut [u32; 4]) = res.unwrap();
+                *((dst.as_ptr() as usize + i * 16) as *mut [u32; 4]) = res.unwrap();
             }
         }
     }

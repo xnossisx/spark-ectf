@@ -2,9 +2,8 @@
 #![no_main]
 
 pub extern crate max7800x_hal as hal;
-pub use hal::pac;
 pub use hal::entry;
-use panic_halt as _;
+pub use hal::pac;
 
 #[entry]
 fn main() -> ! {

@@ -2,12 +2,12 @@
 #![no_main]
 
 pub extern crate max7800x_hal as hal;
-pub use hal::pac;
 pub use hal::entry;
-use panic_halt as _;
+pub use hal::pac;
+
+// extern crate panic_abort;
 
 use embedded_io::Write;
-use rand::RngCore;
 
 #[entry]
 fn main() -> ! {
@@ -27,12 +27,7 @@ fn main() -> ! {
     // Configure UART to host computer with 115200 8N1 settings
     let rx_pin = gpio0_pins.p0_0.into_af1();
     let tx_pin = gpio0_pins.p0_1.into_af1();
-    let mut console = hal::uart::UartPeripheral::uart0(
-        p.uart0,
-        &mut gcr.reg,
-        rx_pin,
-        tx_pin
-    )
+    let mut console = hal::uart::UartPeripheral::uart0(p.uart0, &mut gcr.reg, rx_pin, tx_pin)
         .baud(115200)
         .clock_pclk(&clks.pclk)
         .parity(hal::uart::ParityBit::None)
