@@ -1,47 +1,64 @@
 """
-Author: Ben Janis
+Author: Samuel Lipsutz
 Date: 2025
-
-This source file is part of an example system for MITRE's 2025 Embedded System CTF
-(eCTF). This code is being provided only for educational purposes for the 2025 MITRE
-eCTF competition, and may not meet MITRE standards for quality. Use this code at your
-own risk!
-
-Copyright: Copyright (c) 2025 The MITRE Corporation
 """
 
 import argparse
 import json
 from pathlib import Path
 import hashlib
+from sympy import isprime
 
 from loguru import logger
 
-def stone(totient, base, location):
-    res = base
-    for _ in range(location):
-        res *= res
-        res %= totient
-    return res 
 
-def wind(key, distance, exponent, modulus, totient):
-    # First, we generate the exponent to the key.
-    key_exp = 1
-    bit_position = 0
-    bit = 1
-    while bit <= distance:
-        if bit & distance > 0:
-            key_exp *= stone(totient, exponent, bit_position)
-            key_exp %= totient
-        bit *= 2
-        bit_position += 1
-    # Then, we just return the power.
-    return pow(key, key_exp, modulus)
+def get_primes_starting_with(start, amount): 
+    primes = []
+    i = start
+    while len(primes) < amount:
+        i += 2
+        if isprime(i):
+            primes.append(i)
+    return primes
 
-def pack_stones(stones):
+def wind_encoder(root, target, exponents, modulus):
+    result = root
+    for bit in range(0, 64):
+        if (1 << bit) & target > 0:
+            result = pow(result, exponents[bit], modulus)
+    return result
+
+
+def next_required_intermediate(start):
+    last = 64
+    for bit in range(63, -1, -1):
+        if (1 << bit) & start > 0:
+            last = bit
+    return start + (1 << last)
+
+
+def get_intermediates(start, end, root, exponents, modulus):
+    intermediates = {}
+    while True:
+        intermediates[start] = wind_encoder(root, start, exponents, modulus)
+        start = next_required_intermediate(start)
+        if start > end:
+            break
+    return intermediates
+
+def get_intermediates_hashed(start, end, root, exponents, modulus, device_hash):
+    intermediates = get_intermediates(start, end, root, exponents, modulus)
+    for i in intermediates:
+        intermediates[i] = (intermediates[i] ^ device_hash) % modulus
+    return intermediates
+
+def pack_intermediates(intermediates: dict):
     res = b""
-    for stone in stones:
-        res += stone.to_bytes(64, byteorder="big")
+    positions = sorted(intermediates.keys())
+    for position in positions:
+        res += position.to_bytes(8, byteorder="big")
+    for position in positions:
+        res += intermediates[position].to_bytes(64, byteorder="big")
     return res
 
 def gen_subscription(
@@ -60,33 +77,19 @@ def gen_subscription(
     secrets = json.loads(secrets)
 
     modulus = secrets["modulus"]
-    totient = secrets["totient"]
-    exponent = secrets["exponent"]
+    exponents = get_primes_starting_with(1025, 64)
 
     forward = secrets["sub" + channel]["forward"]
     backward = secrets["sub" + channel]["backward"]
 
-    b_root = 2 ** 64 - 1
-    b_dist = b_root - end
-
-    # First, we should make the stepping stones using the totient.
-
-    stones = []
-    for l in range(4, 64, 4):
-        stones.append(stone(totient, exponent, l))
-
-
-    # Now, we wind forward the root keys to the correct position.
-    f = wind(forward, start, exponent, modulus, totient)
-    b = wind(backward, b_dist, exponent, modulus, totient)
-
-    h_id = sha3_512(device_id)
-    b_hashed = b ^ h_id
+    end_of_time = 2**64 - 1
+    forward_inters = get_intermediates(start, end, forward, exponents, modulus)
+    backward_inters = get_intermediates_hashed(end_of_time - end, end_of_time - start, forward, exponents, modulus, hashlib.sha3_512(device_id))
     # Finally, we pack this like follows:
     
     # Pack the subscription. This will be sent to the decoder with ectf25.tv.subscribe
-    return f.to_bytes(64, byteorder='big') + b_hashed.to_bytes(64, byteorder='big') + \
-        modulus.to_bytes(64, byteorder='big') + pack_stones(stones) + channel.to_bytes(4, byteorder='big') + \
+    return pack_intermediates(forward_inters) + pack_intermediates(backward_inters) + \
+        modulus.to_bytes(64, byteorder='big') + channel.to_bytes(4, byteorder='big') + \
         start.to_bytes(8, byteorder='big') + end.to_bytes(8, byteorder='big')
 
 def parse_args():

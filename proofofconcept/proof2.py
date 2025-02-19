@@ -19,10 +19,10 @@ exponents = get_primes_starting_with(1025, 64)
 
 forward_root = rsa.randnum.read_random_int(1024)
 
-target = 2 ** 64 - 10
+target = 2 ** 64 - 10329841098273
 
 start = 1
-end = 2 ** 64 - 1
+end = 2 ** 64 - 10329841098274
 
 def wind_encoder(root, target, exponents, modulus):
     result = root
