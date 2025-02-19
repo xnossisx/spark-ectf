@@ -5,25 +5,24 @@ edition = "2021"
 publish = false
 
 [package.metadata.docs.rs]
-targets = ["thumbv7em-none-eabi"]
-
-[profile.dev]
-panic ="abort"
-
-[profile.release]
-panic ="abort"
-
-[profile.test]
-panic ="abort"
+targets = ["thumbv7em-none-eabihf"]
+strip=true
+opt-level = "z"
+lto=true
 
 [dependencies]
 cortex-m = { version = "0.7.7", features = ["critical-section-single-core"] }
-embedded-hal-nb = "1.0.0"
 embedded-io = "0.6.1"
-max7800x-hal = "0.6.1"
-# panic-halt = "1.0.0"
-rand = { version = "0.9.0", default-features = false }
-rug = "1.27.0"
+embedded-hal-nb="1.0.0"
+max7800x-hal = { version = "0.6.1", features = ["rt"] }
+panic-halt = "1.0.0"
+crypto-bigint = "0.6.1"
+rand = { version = "0.8.5", default-features = false, optional = true }
+getrandom = { version = "0.2.15", features = ["custom"] }
+
+#rug = {version = "1.27.0", features = ["integer"], default-features = false }
+#gmp-mpfr-sys = { version = "1.6.4", default-features = false, features = [ "force-cross", "use-system-libs" ] }
+#libc = {version = "0.2.169", default-features = false, features = ["const-extern-fn"]}
 
 # Uncomment if you want to use semihosting,
 # cortex-m-semihosting = "0.5"
