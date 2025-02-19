@@ -13,3 +13,6 @@ target/
 # Visual Studio Code workspace settings
 .vscode/
 spark-decoder/.cargo/
+secrets/*
+subscriptions/*
+design/ectf25_design/__pycache__/*

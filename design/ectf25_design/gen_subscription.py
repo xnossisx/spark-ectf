@@ -46,10 +46,10 @@ def get_intermediates(start, end, root, exponents, modulus):
             break
     return intermediates
 
-def get_intermediates_hashed(start, end, root, exponents, modulus, device_hash):
+def get_intermediates_hashed(start, end, root, exponents, modulus, device_hash: bytes):
     intermediates = get_intermediates(start, end, root, exponents, modulus)
     for i in intermediates:
-        intermediates[i] = (intermediates[i] ^ device_hash) % modulus
+        intermediates[i] = (intermediates[i] ^ int.from_bytes(device_hash, byteorder='big')) % modulus
     return intermediates
 
 def pack_intermediates(intermediates: dict):
@@ -58,7 +58,7 @@ def pack_intermediates(intermediates: dict):
     for position in positions:
         res += position.to_bytes(8, byteorder="big")
     for position in positions:
-        res += intermediates[position].to_bytes(64, byteorder="big")
+        res += intermediates[position].to_bytes(128, byteorder="big")
     return res
 
 def gen_subscription(
@@ -76,20 +76,20 @@ def gen_subscription(
     """
     secrets = json.loads(secrets)
 
-    modulus = secrets["modulus"]
+    modulus = secrets[str(channel)]["modulus"]
     exponents = get_primes_starting_with(1025, 64)
 
-    forward = secrets["sub" + channel]["forward"]
-    backward = secrets["sub" + channel]["backward"]
+    forward = secrets[str(channel)]["forward"]
+    backward = secrets[str(channel)]["backward"]
 
     end_of_time = 2**64 - 1
     forward_inters = get_intermediates(start, end, forward, exponents, modulus)
-    backward_inters = get_intermediates_hashed(end_of_time - end, end_of_time - start, forward, exponents, modulus, hashlib.sha3_512(device_id))
+    backward_inters = get_intermediates_hashed(end_of_time - end, end_of_time - start, forward, exponents, modulus, hashlib.sha3_512(device_id.to_bytes(4)).digest())
     # Finally, we pack this like follows:
     
     # Pack the subscription. This will be sent to the decoder with ectf25.tv.subscribe
     return pack_intermediates(forward_inters) + pack_intermediates(backward_inters) + \
-        modulus.to_bytes(64, byteorder='big') + channel.to_bytes(4, byteorder='big') + \
+        modulus.to_bytes(128, byteorder='big') + channel.to_bytes(4, byteorder='big') + \
         start.to_bytes(8, byteorder='big') + end.to_bytes(8, byteorder='big')
 
 def parse_args():
@@ -146,6 +146,7 @@ def main():
 
     # For your own debugging. Feel free to remove
     logger.success(f"Wrote subscription to {str(args.subscription_file.absolute())}")
+    print(len(subscription))
 
 
 if __name__ == "__main__":
