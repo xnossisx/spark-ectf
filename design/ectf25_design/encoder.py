@@ -9,7 +9,9 @@ Date: 2025
 import argparse
 import struct
 import json
+import gmpy2
 from sympy import isprime
+import time
 
 
 def extended_gcd(a, b):
@@ -48,8 +50,8 @@ def modular_inverse(a, m):
     else:
         return x % m
 
-def fletcher32(string):
-    a = list(map(ord,string))
+def fletcher32(bytes):
+    a = list(bytes)
     b = [sum(a[:i])%65535 for i in range(len(a)+1)]
     return (sum(b) << 16) | max(b)
 
@@ -105,22 +107,22 @@ class Encoder:
         #  security requirements
         def wind_encoder(root, target, exponents, modulus):
             result = root
-            for bit in range(0, 64):
+            for bit in range(63, -1, -1):
                 if (1 << bit) & target > 0:
-                    result = pow(result, exponents[bit], modulus)
+                    result = gmpy2.powmod(exponents[bit], result, modulus)
                 return result
         
-        forward_root = self.secrets[channel]["forward"]
-        backward_root = self.secrets[channel]["backward"]
-        modulus = self.secrets[channel]["modulus"]
+        forward_root = self.secrets[str(channel)]["forward"]
+        backward_root = self.secrets[str(channel)]["backward"]
+        modulus = self.secrets[str(channel)]["modulus"]
         end_of_time = 2**64 - 1
         forward = wind_encoder(forward_root, timestamp, self.exponents, modulus)
         backward = wind_encoder(backward_root, end_of_time - timestamp, self.exponents, modulus)
 
         guard = forward ^ backward
-        guard_inverse = modular_inverse(guard, modulus)
+        guard_inverse = modular_inverse(guard, 2 ** 512 - 1)
 
-        encoded = pow(int(frame), guard_inverse, modulus).to_bytes(64, byteorder="big")
+        encoded = pow(int.from_bytes(frame), guard_inverse, 2 ** 512 - 1).to_bytes(64, byteorder="big")
         
         checksum = fletcher32(frame).to_bytes(4, byteorder="big")
         return struct.pack("<IQ", channel, timestamp) + encoded + checksum
@@ -136,7 +138,7 @@ def main():
     """
     parser = argparse.ArgumentParser(prog="ectf25_design.encoder")
     parser.add_argument(
-        "secrets_file", type=argparse.FileType("rb"), help="Path to the secrets file"
+        "secrets", type=argparse.FileType("rb"), help="Path to the secrets file"
     )
     parser.add_argument("channel", type=int, help="Channel to encode for")
     parser.add_argument("frame", help="Contents of the frame")
@@ -144,7 +146,11 @@ def main():
     args = parser.parse_args()
 
     encoder = Encoder(args.secrets.read())
+    
+    start = time.time()
     print(repr(encoder.encode(args.channel, args.frame.encode(), args.timestamp)))
+    end = time.time() - start
+    print("Time taken: ", end)
 
 
 if __name__ == "__main__":

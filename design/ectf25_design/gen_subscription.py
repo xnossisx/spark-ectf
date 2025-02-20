@@ -23,9 +23,9 @@ def get_primes_starting_with(start, amount):
 
 def wind_encoder(root, target, exponents, modulus):
     result = root
-    for bit in range(0, 64):
+    for bit in range(63, -1, -1):
         if (1 << bit) & target > 0:
-            result = pow(result, exponents[bit], modulus)
+            result = pow(exponents[bit], result, modulus)
     return result
 
 
@@ -53,7 +53,7 @@ def get_intermediates_hashed(start, end, root, exponents, modulus, device_hash: 
     return intermediates
 
 def pack_intermediates(intermediates: dict):
-    res = b""
+    res = len(intermediates).to_bytes(1)
     positions = sorted(intermediates.keys())
     for position in positions:
         res += position.to_bytes(8, byteorder="big")
