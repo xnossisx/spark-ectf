@@ -80,6 +80,7 @@ def pack_metadata(channel: int, modulus: int, start: int, end: int, forward_inte
     
     for _ in range(8192 - len(res)):
         res += b"\x00"
+    return res
 
 def gen_subscription(
     secrets: bytes, device_id: int, start: int, end: int, channel: int
