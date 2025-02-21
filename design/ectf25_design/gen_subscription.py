@@ -53,12 +53,23 @@ def get_intermediates_hashed(start, end, root, exponents, modulus, device_hash: 
     return intermediates
 
 def pack_intermediates(intermediates: dict):
-    res = len(intermediates).to_bytes(1)
+    res = b""
+    positions = sorted(intermediates.keys())
+    for position in positions:
+        res += intermediates[position].to_bytes(128, byteorder="big")
+    # Pack the remainder of the 8192 bytes
+    for _ in range(8192 - len(positions) * 128):
+        res += b"\x00"
+    return res
+
+def pack_inter_positions(intermediates: dict):
+    res = b""
     positions = sorted(intermediates.keys())
     for position in positions:
         res += position.to_bytes(8, byteorder="big")
-    for position in positions:
-        res += intermediates[position].to_bytes(128, byteorder="big")
+    # Pack the remainder of the 512 bytes
+    for _ in range(512 - len(positions) * 8):
+        res += b"\x00"
     return res
 
 def gen_subscription(
@@ -89,6 +100,7 @@ def gen_subscription(
     
     # Pack the subscription. This will be sent to the decoder with ectf25.tv.subscribe
     return pack_intermediates(forward_inters) + pack_intermediates(backward_inters) + \
+        pack_inter_positions(forward_inters) + pack_inter_positions(backward_inters) + \
         modulus.to_bytes(128, byteorder='big') + channel.to_bytes(4, byteorder='big') + \
         start.to_bytes(8, byteorder='big') + end.to_bytes(8, byteorder='big')
 
