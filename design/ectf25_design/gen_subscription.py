@@ -72,6 +72,15 @@ def pack_inter_positions(intermediates: dict):
         res += b"\x00"
     return res
 
+def pack_metadata(channel: int, modulus: int, start: int, end: int, forward_inters: dict, backward_inters: dict):
+    res = len(forward_inters).to_bytes(1, byteorder='big') + len(backward_inters).to_bytes(1, byteorder='big') + \
+        pack_inter_positions(forward_inters) + pack_inter_positions(backward_inters) + \
+        modulus.to_bytes(128, byteorder='big') + channel.to_bytes(4, byteorder='big') + \
+        start.to_bytes(8, byteorder='big') + end.to_bytes(8, byteorder='big')
+    
+    for _ in range(8192 - len(res)):
+        res += b"\x00"
+
 def gen_subscription(
     secrets: bytes, device_id: int, start: int, end: int, channel: int
 ) -> bytes:
@@ -99,10 +108,8 @@ def gen_subscription(
     # Finally, we pack this like follows:
     
     # Pack the subscription. This will be sent to the decoder with ectf25.tv.subscribe
-    return pack_intermediates(forward_inters) + pack_intermediates(backward_inters) + \
-        pack_inter_positions(forward_inters) + pack_inter_positions(backward_inters) + \
-        modulus.to_bytes(128, byteorder='big') + channel.to_bytes(4, byteorder='big') + \
-        start.to_bytes(8, byteorder='big') + end.to_bytes(8, byteorder='big')
+    return pack_metadata(channel, modulus, start, end, forward_inters, backward_inters) + \
+        pack_intermediates(forward_inters) + pack_intermediates(backward_inters)
 
 def parse_args():
     """Define and parse the command line arguments
