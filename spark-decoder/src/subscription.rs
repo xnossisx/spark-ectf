@@ -1,11 +1,14 @@
-use crate::{flash, get_id, SUB_LOC};
+use crate::{flash, get_id, Integer, SUB_LOC};
 use core::ffi::c_void;
 use core::mem::zeroed;
 use core::ops::BitXorAssign;
-use crypto_bigint::{Odd, U1024, U8192};
+use core::ptr::{null, null_mut};
+use crypto_bigint::{Int, Odd, U1024, U8192};
 use crypto_bigint::modular::{MontyForm, MontyParams};
+use hal::pac::dvs::Mon;
 
-type Integer = U1024;
+const FORWARD: u64 = 0x1f8c25d4b902e785;
+const BACKWARD: u64 = 0xf329d3e6bb90fcc5;
 
 #[derive(Copy)]
 #[derive(Clone)]
@@ -15,7 +18,7 @@ struct SubStat {
     end: u64,
 }
 
-fn get_subscriptions() -> [SubStat; 8] {
+pub fn get_subscriptions() -> [SubStat; 8] {
     let mut ret: [SubStat; 8] = [SubStat{exists: false, start: 0, end: 0}; 8];
     for i in 0..8 {
         let mut data: [u8; 17] = [0;17];
@@ -26,71 +29,67 @@ fn get_subscriptions() -> [SubStat; 8] {
     ret
 }
 
-struct Subscription {
-    mem_location: *const c_void,
-    forward_enc: Integer,
-    backward_enc: Integer,
-    n: Odd<Integer>,
-    e: Integer,
-    refs: [Integer; 16],
-    start: u64,
-    end: u64,
+#[derive(Copy)]
+#[derive(Clone)]
+pub struct Subscription {
+    pub(crate) n: Odd<Integer>,
+    pub(crate) forward_refs: [Integer; 64],
+    pub(crate) back_refs: [Integer; 64],
+    pub(crate) forward_pos: [u64; 64],
+    pub(crate) backward_pos: [u64; 64],
+    pub(crate) start: u64,
+    pub(crate) end: u64,
+    pub(crate) channel: u32
 }
 
 impl Subscription {
-    fn get_ref_exponent(&self, idx: u64) -> Integer {
-        let relevant: usize = (idx << 2) as usize;
-
-        Integer::from(&self.refs[relevant as usize])
-    }
-
-    /*fn get_forward_key(&self) -> Integer {
-        Integer::from(&self.forward_enc | get_id())
-    }*/
-
-    fn forward_key_shift(&mut self, frames: u64) {
-        let mut forward_new = Integer::from(&self.forward_enc);
-        self.key_shift(&mut (forward_new), frames);
-        self.forward_enc = Integer::from(forward_new);
-        self.start += frames;
-    }
-
-    /*fn get_backward_key(&self) -> Integer {
-        Integer::from(&self.backward_enc | get_id())
-    }*/
-
-    fn backward_key_shift(&mut self, frames: u64) -> Integer {
-        let mut backward_new = Integer::from(&self.backward_enc);
-        self.key_shift(&mut backward_new, frames);
-        backward_new
-    }
-
-    fn get_timestamps(&self) -> (u64, u64) {
-        (self.start, self.end)
-    }
-
-    fn get_total_key(&mut self, frame: u64) -> Integer {
-        self.forward_key_shift(frame - &self.start);
-        let backward_curr = self.backward_key_shift(&self.end - frame);
-        &self.forward_enc | backward_curr
-    }
-
-    fn key_shift(&self, key: &mut Integer, frames: u64) {
-        let mut bit: u64 = 0;
-        let mut exponent: U8192 = U8192::from(&self.e);
-        (*key).bitxor_assign(&Integer::from(get_id()));
-        let monty_key: MontyForm<32> = MontyForm::new(key, MontyParams::new(self.n));
-        while (1 << bit) < frames && bit < 64 {
-            if bit % 4 == 0 {
-                exponent = U8192::from(&self.get_ref_exponent(bit));
-            }
-            if (1 << bit) & frames != 0 {
-                monty_key.pow(&exponent);
-            }
-            (exponent,_) = exponent.square_wide();
-            bit += 1;
+    pub fn new() -> Subscription {
+        Subscription {
+            n: Odd::new(Integer::ONE).unwrap(),
+            forward_refs: [Integer::ZERO; 64],
+            back_refs: [Integer::ZERO; 64],
+            forward_pos: [0; 64],
+            backward_pos: [0; 64],
+            start: 0,
+            end: 0,
+            channel: 0
         }
-        *key = monty_key.retrieve();
-        (*key).bitxor_assign(&Integer::from(get_id()));
+    }
+    
+    pub fn decode_side(&self, target: u64, dir: u64) -> Integer {
+        let refs = if dir == FORWARD {&self.forward_refs} else if dir == BACKWARD {&self.back_refs} else {return Integer::ZERO};
+        let pos = if dir == FORWARD {&self.forward_pos} else if dir == BACKWARD {&self.backward_pos} else {return Integer::ZERO};
+        let mut closest_pos: u64 = 0;
+        let mut closest_intermediate: &Integer = &refs[0];
+
+        for (i, idx_ref) in pos.iter().enumerate() {
+            if *idx_ref > target {
+                break;
+            }
+            if *idx_ref > closest_pos as u64 {
+                closest_pos = *idx_ref;
+                closest_intermediate = &refs[i]
+            }
+        }
+
+        let mut result: Integer = *closest_intermediate;
+
+        let mut idx_bit = 63;
+        loop {
+            if (1 << idx_bit) & target > 0 && (1 << idx_bit) & closest_pos == 0 {
+                let monty = MontyForm::new(&refs[idx_bit], MontyParams::new(self.n)).pow(&result);
+                result = monty.retrieve();
+            }
+            if (idx_bit == 0) {
+                break;
+            }
+            idx_bit -= 1;
+        }
+
+        result
+    }
+
+    pub fn decode(target: Integer) {
+
     }
 }

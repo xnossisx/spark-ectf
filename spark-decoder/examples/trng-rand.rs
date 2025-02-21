@@ -2,10 +2,10 @@
 #![no_main]
 
 pub extern crate max7800x_hal as hal;
+
+use crypto_bigint::rand_core::RngCore;
 pub use hal::entry;
 pub use hal::pac;
-
-// extern crate panic_abort;
 
 use embedded_io::Write;
 

@@ -1,11 +1,15 @@
 use alloc::alloc::alloc;
 use core::alloc::Layout;
+use core::cmp::{max, min};
 use crate::pac::Uart0;
 use core::ptr::null_mut;
+use cortex_m::asm::nop;
 use hal::gcr::clocks::{Clock, PeripheralClock};
 use hal::gcr::GcrRegisters;
 use hal::gpio::{Af1, Pin};
 use hal::uart::BuiltUartPeripheral;
+
+static MAGIC: u8 = b'%';
 
 static mut CONSOLE_HOOK: *mut BuiltUartPeripheral<Uart0, Pin<0, 0, Af1>, Pin<0, 1, Af1>, (), ()> =
     null_mut();
@@ -28,7 +32,30 @@ pub fn init(
 
 pub fn write_console(bytes: &[u8]) {
     unsafe {
-        (*CONSOLE_HOOK).write_bytes(bytes);
+        write_comm(bytes, b'G');
+    }
+}
+
+
+pub unsafe fn write_comm(bytes: &[u8], code: u8) {
+    (*CONSOLE_HOOK).write_byte(MAGIC);
+    (*CONSOLE_HOOK).write_byte(code);
+    (*CONSOLE_HOOK).write_byte(((bytes.len() as u16) & 0x00FF) as u8);
+    (*CONSOLE_HOOK).write_byte((((bytes.len() as u16) & 0xFF00) >> 8) as u8);
+    for i in 0..(bytes.len() >> 8) {
+        while read_byte() != b'\x07' {
+            nop()
+        }
+        (*CONSOLE_HOOK).write_bytes(&bytes[i<<8..min((i + 1) << 8, bytes.len() - (i << 8))]);
+    }
+    while read_byte() != b'\x07' {
+        nop()
+    }
+}
+
+pub fn write_err(bytes: &[u8]) {
+    unsafe {
+        write_comm(bytes, b'E');
     }
 }
 
@@ -40,31 +67,32 @@ pub fn ack() {
     write_console(b"\x07");
 }
 
-pub fn read_resp() {
+
+// Reads whatever the TV is sending over right now.
+pub fn read_resp() -> Option<&'static[u8]> {
     let magic = read_byte();
+    if magic != MAGIC {return None;}
     let opcode = read_byte();
+    if (opcode != b'E' || opcode != b'L' || opcode != b'S' || opcode != b'D' || opcode != b'A') {return None;}
     let length: u16 = ((read_byte() as u16) << 8) + (read_byte() as u16);
-    match opcode {
-        b'S' => {
-            
-        },
-        b'L' => {
+    unsafe {
+        let layout: Layout;
+        if let Ok(l) = Layout::from_size_align(length as usize, 16) {
+            layout = l;
+        } else {
+            write_err(b"Alloc error");
+            return None;
+        }
+        let byte_list: &mut [u8] = core::slice::from_raw_parts_mut(alloc(layout), length as usize);
+        ack();
+        for i in 0..(length >> 8) as usize {
+            (*CONSOLE_HOOK).read_bytes(get_range(byte_list, i, length));
+            ack();
+        }
+        Some(byte_list)
+    }
+}
 
-        },
-        b'D' => {
-            unsafe {
-                let byte_list = alloc(Layout::from_size_align(length as usize, 16).unwrap());
-            }        
-        },
-        b'A' => {
-
-        },
-        b'E' => {
-
-        },
-        b'G' => {
-            
-        },
-        _ => write_console(b"weird opcode")
-    };
+pub fn get_range(list: &mut [u8], page: usize, length: u16) -> &mut [u8] {
+    &mut list[page<<8..min((page + 1) << 8, length as usize - (page << 8))]
 }
