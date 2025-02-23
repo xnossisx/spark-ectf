@@ -1,13 +1,10 @@
+#![feature(concat_bytes)]
 #![no_std]
 #![no_main]
 
-use alloc::alloc::alloc;
 use alloc::boxed::Box;
 use core::alloc::{GlobalAlloc, Layout};
 use core::cell::RefCell;
-use core::ffi::c_void;
-use core::mem;
-use core::mem::transmute;
 use crypto_bigint::{Encoding, Int, Odd, U1024};
 use embedded_alloc::LlffHeap;
 
@@ -181,5 +178,5 @@ fn load_subscriptions() -> Box<[Subscription; 8]> {
 }
 
 fn get_id() -> u32 {
-    0 //TODO: fix
+    env!("DECODER_ID").parse::<u32>().unwrap()
 }

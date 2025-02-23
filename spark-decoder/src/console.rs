@@ -1,6 +1,7 @@
 use alloc::alloc::alloc;
 use core::alloc::Layout;
 use core::cmp::{max, min};
+use core::intrinsics::volatile_copy_memory;
 use crate::pac::Uart0;
 use core::ptr::null_mut;
 use cortex_m::asm::nop;
@@ -8,6 +9,7 @@ use hal::gcr::clocks::{Clock, PeripheralClock};
 use hal::gcr::GcrRegisters;
 use hal::gpio::{Af1, Pin};
 use hal::uart::BuiltUartPeripheral;
+use crate::subscription::get_subscriptions;
 
 static MAGIC: u8 = b'%';
 
@@ -76,6 +78,27 @@ pub fn read_resp() -> Option<&'static[u8]> {
     if (opcode != b'E' || opcode != b'L' || opcode != b'S' || opcode != b'D' || opcode != b'A') {return None;}
     let length: u16 = ((read_byte() as u16) << 8) + (read_byte() as u16);
     unsafe {
+        ack();
+        if opcode == b'L' {
+            let subscriptions = get_subscriptions();
+            if let Ok(l) = Layout::from_size_align(4usize + subscriptions.len()*20usize, 16) {
+                let ret = core::slice::from_raw_parts_mut(alloc(l), 4usize + subscriptions.len()*20usize);
+                ret[0..4].copy_from_slice(bytemuck::bytes_of(&(subscriptions.len() as u32)));
+                //ret[0..4] = bytemuck::try_cast(&(subscriptions.len() as u32)).unwrap();
+                for i in 0..subscriptions.len() {
+                    ret[i*20usize+4..i*20usize+8].copy_from_slice(bytemuck::bytes_of(&(i as i32)));
+                    ret[i*20usize+8..i*20usize+16].copy_from_slice(bytemuck::bytes_of(&(subscriptions[i].start)));
+                    ret[i*20usize+16..i*20usize+24].copy_from_slice(bytemuck::bytes_of(&(subscriptions[i].end)));
+                }
+                write_comm(ret,b'L');
+                return None;
+            } else {
+                write_err(b"Alloc error");
+                return None;
+            }
+
+            return None;
+        }
         let layout: Layout;
         if let Ok(l) = Layout::from_size_align(length as usize, 16) {
             layout = l;
@@ -84,12 +107,35 @@ pub fn read_resp() -> Option<&'static[u8]> {
             return None;
         }
         let byte_list: &mut [u8] = core::slice::from_raw_parts_mut(alloc(layout), length as usize);
-        ack();
         for i in 0..(length >> 8) as usize {
             (*CONSOLE_HOOK).read_bytes(get_range(byte_list, i, length));
             ack();
         }
-        Some(byte_list)
+
+        match opcode {
+            b'L' => {
+                let subscriptions = get_subscriptions();
+                let layout: Layout;
+                if let Ok(l) = Layout::from_size_align(subscriptions.len() as usize, 16) {
+                    layout = l;
+                } else {
+                    write_err(b"Alloc error");
+                    return None;
+                }
+                let byte_list: &mut [u8] = core::slice::from_raw_parts_mut(alloc(layout), length as usize);
+                for i in 0..(length >> 8) as usize {
+                    (*CONSOLE_HOOK).read_bytes(get_range(byte_list, i, length));
+                    ack();
+                }
+                for sub in subscriptions {
+
+                }
+            }
+            _ => {}
+        }
+
+
+
     }
 }
 

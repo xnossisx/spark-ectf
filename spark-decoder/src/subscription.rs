@@ -12,10 +12,10 @@ const BACKWARD: u64 = 0xf329d3e6bb90fcc5;
 
 #[derive(Copy)]
 #[derive(Clone)]
-struct SubStat {
-    exists: bool,
-    start: u64,
-    end: u64,
+pub struct SubStat {
+    pub(crate) exists: bool,
+    pub(crate) start: u64,
+    pub(crate) end: u64,
 }
 
 pub fn get_subscriptions() -> [SubStat; 8] {
@@ -24,10 +24,11 @@ pub fn get_subscriptions() -> [SubStat; 8] {
         let mut data: [u8; 17] = [0;17];
         let res = flash::read_bytes(((SUB_LOC as usize) + i * 8192) as u32, &mut data, 17);
         ret[i] = SubStat{exists: (data[0] != 0), start: u64::from_be_bytes(data[1..9].split_at(core::mem::size_of::<u64>()).0.try_into().unwrap()),
-            end: u64::from_be_bytes(data[9..17].split_at(core::mem::size_of::<u64>()).0.try_into().unwrap())};
+            end: u64::from_be_bytes(data[9..17].split_at(core::mem::size_of::<u64>()).0.try_into().unwrap()), valid: false};
     }
     ret
 }
+
 
 #[derive(Copy)]
 #[derive(Clone)]
