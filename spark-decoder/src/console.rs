@@ -9,6 +9,7 @@ use hal::gcr::clocks::{Clock, PeripheralClock};
 use hal::gcr::GcrRegisters;
 use hal::gpio::{Af1, Pin};
 use hal::uart::BuiltUartPeripheral;
+use crate::{flash, SUB_LOC, SUB_SIZE};
 use crate::subscription::get_subscriptions;
 
 static MAGIC: u8 = b'%';
@@ -113,25 +114,22 @@ pub fn read_resp() -> Option<&'static[u8]> {
         }
 
         match opcode {
-            b'L' => {
-                let subscriptions = get_subscriptions();
-                let layout: Layout;
-                if let Ok(l) = Layout::from_size_align(subscriptions.len() as usize, 16) {
-                    layout = l;
-                } else {
-                    write_err(b"Alloc error");
-                    return None;
-                }
-                let byte_list: &mut [u8] = core::slice::from_raw_parts_mut(alloc(layout), length as usize);
-                for i in 0..(length >> 8) as usize {
-                    (*CONSOLE_HOOK).read_bytes(get_range(byte_list, i, length));
-                    ack();
-                }
-                for sub in subscriptions {
+            b'S' => {
+                let channel: u32 = *bytemuck::from_bytes(&byte_list[0..4]);
+                let start: u64 = *bytemuck::from_bytes(&byte_list[4..12]);
+                let end: u64 = *bytemuck::from_bytes(&byte_list[12..20]);
 
-                }
+                let mut pos: usize = SUB_LOC as usize + channel as usize * SUB_SIZE as usize + 2;
+
+                flash::write_bytes(pos as u32, &byte_list[pos..pos + 1172 as usize], 1172);
+
+                pos = SUB_LOC as usize + (channel as usize * SUB_SIZE as usize) + 8192;
+                flash::write_bytes(pos as u32, &byte_list[pos..pos + 16384 as usize], 16384);
+
+                ack();
+                None
             }
-            _ => {}
+            _ => None
         }
 
 

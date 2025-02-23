@@ -24,7 +24,7 @@ pub fn get_subscriptions() -> [SubStat; 8] {
         let mut data: [u8; 17] = [0;17];
         let res = flash::read_bytes(((SUB_LOC as usize) + i * 8192) as u32, &mut data, 17);
         ret[i] = SubStat{exists: (data[0] != 0), start: u64::from_be_bytes(data[1..9].split_at(core::mem::size_of::<u64>()).0.try_into().unwrap()),
-            end: u64::from_be_bytes(data[9..17].split_at(core::mem::size_of::<u64>()).0.try_into().unwrap()), valid: false};
+            end: u64::from_be_bytes(data[9..17].split_at(core::mem::size_of::<u64>()).0.try_into().unwrap())};
     }
     ret
 }

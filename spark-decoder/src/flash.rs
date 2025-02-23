@@ -41,7 +41,7 @@ pub fn read_bytes(frm: u32, dst: &mut [u8], len: usize) -> Result<(), &[u8]> {
     Ok(())
 }
 
-pub fn write_bytes(dst: u32, from: &mut [u8], len: usize) -> Result<(), &[u8]> {
+pub fn write_bytes(dst: u32, from: &[u8], len: usize) -> Result<(), &[u8]> {
     if from.len() < len {
         return Err(b"FlashError::LowSpace");
     }
