@@ -1,16 +1,16 @@
 use alloc::alloc::alloc;
 use core::alloc::Layout;
 use core::cmp::{max, min};
-use core::intrinsics::volatile_copy_memory;
 use crate::pac::Uart0;
 use core::ptr::null_mut;
 use cortex_m::asm::nop;
+use crypto_bigint::{Integer, Odd, U1024};
 use hal::gcr::clocks::{Clock, PeripheralClock};
 use hal::gcr::GcrRegisters;
 use hal::gpio::{Af1, Pin};
 use hal::uart::BuiltUartPeripheral;
 use crate::{flash, SUB_LOC, SUB_SIZE};
-use crate::subscription::get_subscriptions;
+use crate::subscription::{get_subscriptions, Subscription};
 
 static MAGIC: u8 = b'%';
 
@@ -72,7 +72,7 @@ pub fn ack() {
 
 
 // Reads whatever the TV is sending over right now.
-pub fn read_resp() -> Option<&'static[u8]> {
+pub fn read_resp(subscriptions: &mut [Subscription; 8]) -> Option<&'static[u8]> {
     let magic = read_byte();
     if magic != MAGIC {return None;}
     let opcode = read_byte();
@@ -127,6 +127,21 @@ pub fn read_resp() -> Option<&'static[u8]> {
                 flash::write_bytes(pos as u32, &byte_list[pos..pos + 16384 as usize], 16384);
 
                 ack();
+                None
+            }
+            b'D' => {
+                let channel: u32 = *bytemuck::from_bytes(&byte_list[0..4]);
+                let timestamp: u64 = *bytemuck::from_bytes(&byte_list[4..12]);
+                let frame: U1024 = <crate::Integer>::from_be_slice(byte_list[12..140].try_into().unwrap()); // 128 bytes
+                let checksum: u32 = *bytemuck::from_bytes(&byte_list[140..144]);
+                ack();
+
+                let sub = subscriptions.get(0).unwrap();
+
+                let decoded = sub.decode(frame, timestamp);
+                let ret: [u8; 64] = decoded.to_be_bytes();
+                write_comm(ret,b'D');
+
                 None
             }
             _ => None

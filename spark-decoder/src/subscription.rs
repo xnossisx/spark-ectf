@@ -1,9 +1,9 @@
 use crate::{flash, get_id, Integer, SUB_LOC};
 use core::ffi::c_void;
 use core::mem::zeroed;
-use core::ops::BitXorAssign;
+use core::ops::{BitXorAssign, Not};
 use core::ptr::{null, null_mut};
-use crypto_bigint::{Int, Odd, U1024, U8192};
+use crypto_bigint::{Int, Odd, U1024, U512, U8192};
 use crypto_bigint::modular::{MontyForm, MontyParams};
 use hal::pac::dvs::Mon;
 
@@ -90,11 +90,11 @@ impl Subscription {
         result
     }
 
-    pub fn decode(&self, target: Integer) -> Integer {
-        let forward = self.decode_side(target, FORWARD);
-        let backward = self.decode_side(target, BACKWARD);
+    pub fn decode(&self, target: Integer, timestamp: u64) -> U512 {
+        let forward = self.decode_side(timestamp, FORWARD);
+        let backward = self.decode_side(!timestamp, BACKWARD); // Technically passing in 2^64 - timestamp
 
-        let guard = forward.bitxor(backward);
+        let guard = forward.bitxor(&backward);
         MontyForm::new(&target, MontyParams::new(self.n)).pow(&guard).retrieve()
     }
 }

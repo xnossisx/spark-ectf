@@ -85,7 +85,7 @@ fn main() -> ! {
     // Fundamental loop
     loop {
         delay.delay_us(5u32 + (trng.gen_u32() & 511));
-        let val = console::read_resp();
+        let val = console::read_resp(&mut subscriptions);
         if val.is_some() {
             process(val.unwrap());
         }
