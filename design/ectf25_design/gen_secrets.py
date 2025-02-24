@@ -39,6 +39,8 @@ def gen_secrets(channels: list[int]) -> bytes:
 
         modulus = public.n
         secrets[channel]["modulus"] = modulus
+        secrets[channel]["p"] = private.p
+        secrets[channel]["q"] = private.q
 
         secrets[channel]["forward"] = rsa.randnum.read_random_int(1024)
         secrets[channel]["backward"] = rsa.randnum.read_random_int(1024)

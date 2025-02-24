@@ -115,14 +115,15 @@ class Encoder:
         forward_root = self.secrets[str(channel)]["forward"]
         backward_root = self.secrets[str(channel)]["backward"]
         modulus = self.secrets[str(channel)]["modulus"]
+        totient = (self.secrets[str(channel)]["p"] - 1) * (self.secrets[str(channel)]["q"] - 1)
         end_of_time = 2**64 - 1
         forward = wind_encoder(forward_root, timestamp, self.exponents, modulus)
         backward = wind_encoder(backward_root, end_of_time - timestamp, self.exponents, modulus)
 
         guard = forward ^ backward
-        guard_inverse = modular_inverse(guard, 2 ** 512 - 1)
+        guard_inverse = modular_inverse(guard, totient)
 
-        encoded = pow(int.from_bytes(frame), guard_inverse, 2 ** 512 - 1).to_bytes(64, byteorder="big")
+        encoded = pow(int.from_bytes(frame), guard_inverse, modulus).to_bytes(128, byteorder="big")
         
         checksum = fletcher32(frame).to_bytes(4, byteorder="big")
         return struct.pack("<IQ", channel, timestamp) + encoded + checksum

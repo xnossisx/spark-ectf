@@ -90,7 +90,11 @@ impl Subscription {
         result
     }
 
-    pub fn decode(target: Integer) {
+    pub fn decode(&self, target: Integer) -> Integer {
+        let forward = self.decode_side(target, FORWARD);
+        let backward = self.decode_side(target, BACKWARD);
 
+        let guard = forward.bitxor(backward);
+        MontyForm::new(&target, MontyParams::new(self.n)).pow(&guard).retrieve()
     }
 }
