@@ -136,11 +136,11 @@ pub fn read_resp(subscriptions: &mut [Subscription; 8]) -> Option<&'static[u8]> 
                 let checksum: u32 = *bytemuck::from_bytes(&byte_list[140..144]);
                 ack();
 
-                let sub = subscriptions.get(0).unwrap();
+                let sub = subscriptions.into_iter().filter(|s| s.channel == channel).next().unwrap();
 
                 let decoded = sub.decode(frame, timestamp);
                 let ret: [u8; 64] = decoded.to_be_bytes();
-                write_comm(ret,b'D');
+                write_comm(&ret,b'D');
 
                 None
             }

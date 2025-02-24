@@ -95,6 +95,6 @@ impl Subscription {
         let backward = self.decode_side(!timestamp, BACKWARD); // Technically passing in 2^64 - timestamp
 
         let guard = forward.bitxor(&backward);
-        MontyForm::new(&target, MontyParams::new(self.n)).pow(&guard).retrieve()
+        (&MontyForm::new(&target, MontyParams::new(self.n)).pow(&guard).retrieve()).into()
     }
 }
