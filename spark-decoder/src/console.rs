@@ -1,6 +1,7 @@
 use alloc::alloc::alloc;
 use core::alloc::Layout;
 use core::cmp::{max, min};
+use core::mem::MaybeUninit;
 use crate::pac::Uart0;
 use core::ptr::null_mut;
 use cortex_m::asm::nop;
@@ -14,8 +15,12 @@ use crate::subscription::{get_subscriptions, Subscription};
 
 static MAGIC: u8 = b'%';
 
-static mut CONSOLE_HOOK: *mut BuiltUartPeripheral<Uart0, Pin<0, 0, Af1>, Pin<0, 1, Af1>, (), ()> =
-    null_mut();
+type cons = BuiltUartPeripheral<Uart0, Pin<0, 0, Af1>, Pin<0, 1, Af1>, (), ()>;
+
+static mut CONSOLE_HOOK: MaybeUninit<cons> =
+    MaybeUninit::uninit();
+static mut INIT_CONSOLE: bool = false;
+
 
 pub fn init(
     uart0: Uart0,
@@ -25,12 +30,13 @@ pub fn init(
     pclk: &Clock<PeripheralClock>,
 ) {
     unsafe {
-        if !CONSOLE_HOOK.is_null() { return }
-        CONSOLE_HOOK = &mut hal::uart::UartPeripheral::uart0(uart0, reg, rx_pin, tx_pin)
+        if INIT_CONSOLE { return }
+        CONSOLE_HOOK.write(hal::uart::UartPeripheral::uart0(uart0, reg, rx_pin, tx_pin)
             .baud(115200)
             .clock_pclk(pclk)
             .parity(hal::uart::ParityBit::None)
-            .build();
+            .build());
+        INIT_CONSOLE = true;
     }
 }
 
@@ -42,15 +48,16 @@ pub fn write_console(bytes: &[u8]) {
 
 
 pub unsafe fn write_comm(bytes: &[u8], code: u8) {
-    (*CONSOLE_HOOK).write_byte(MAGIC);
-    (*CONSOLE_HOOK).write_byte(code);
-    (*CONSOLE_HOOK).write_byte(((bytes.len() as u16) & 0x00FF) as u8);
-    (*CONSOLE_HOOK).write_byte((((bytes.len() as u16) & 0xFF00) >> 8) as u8);
+    if (!INIT_CONSOLE) {return;}
+    CONSOLE_HOOK.assume_init_ref().write_byte(MAGIC);
+    CONSOLE_HOOK.assume_init_ref().write_byte(code);
+    CONSOLE_HOOK.assume_init_ref().write_byte(((bytes.len() as u16) & 0x00FF) as u8);
+    CONSOLE_HOOK.assume_init_ref().write_byte((((bytes.len() as u16) & 0xFF00) >> 8) as u8);
     for i in 0..(bytes.len() >> 8) {
         while read_byte() != b'\x07' {
             nop()
         }
-        (*CONSOLE_HOOK).write_bytes(&bytes[i<<8..min((i + 1) << 8, bytes.len() - (i << 8))]);
+        CONSOLE_HOOK.assume_init_ref().write_bytes(&bytes[i<<8..min((i + 1) << 8, bytes.len() - (i << 8))]);
     }
     while read_byte() != b'\x07' {
         nop()
@@ -64,11 +71,11 @@ pub fn write_err(bytes: &[u8]) {
 }
 
 pub unsafe fn write_async(bytes: &[u8]) {
-    (*CONSOLE_HOOK).write_bytes(&bytes);
+    CONSOLE_HOOK.assume_init_ref().write_bytes(&bytes);
 }
 
 pub fn read_byte() -> u8 {
-    unsafe {(*CONSOLE_HOOK).read_byte()}
+    unsafe { CONSOLE_HOOK.assume_init_ref().read_byte()}
 }
 
 pub fn ack() {
@@ -113,7 +120,7 @@ pub fn read_resp(subscriptions: &mut [Subscription; 8]) {
         }
         let byte_list: &mut [u8] = core::slice::from_raw_parts_mut(alloc(layout), length as usize);
         for i in 0..(length >> 8) as usize {
-            (*CONSOLE_HOOK).read_bytes(get_range(byte_list, i, length));
+            CONSOLE_HOOK.assume_init_ref().read_bytes(get_range(byte_list, i, length));
             ack();
         }
 
