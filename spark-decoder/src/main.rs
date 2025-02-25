@@ -17,7 +17,6 @@ static HEAP: Heap = Heap::empty();
 mod console;
 mod flash;
 mod subscription;
-mod commands;
 //mod uart;
 
 extern crate alloc;
@@ -41,7 +40,6 @@ pub const SUB_LOC: *const u8 = 0x20008000 as *const u8;
 
 #[entry]
 fn main() -> ! {
-
     {
         use core::mem::MaybeUninit;
         const HEAP_SIZE: usize = 1024;
@@ -49,10 +47,8 @@ fn main() -> ! {
         unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
     }
 
-    // heprintln!("Hello from semihosting!");
     let p = pac::Peripherals::take().unwrap();
     let core = pac::CorePeripherals::take().unwrap();
-
     let mut gcr = hal::gcr::Gcr::new(p.gcr, p.lpgcr);
     let ipo = hal::gcr::clocks::Ipo::new(gcr.osc_guards.ipo).enable(&mut gcr.reg);
     let clks = gcr
@@ -61,10 +57,6 @@ fn main() -> ! {
         .set_divider::<hal::gcr::clocks::Div1>(&mut gcr.reg)
         .freeze();
 
-    // Initialize a delay timer using the ARM SYST (SysTick) peripheral
-    let rate = clks.sys_clk.frequency;
-    let mut delay = cortex_m::delay::Delay::new(core.SYST, rate);
-
     // Initialize and split the GPIO0 peripheral into pins
     let gpio0_pins = hal::gpio::Gpio0::new(p.gpio0, &mut gcr.reg).split();
     // Configure UART to host computer with 115200 8N1 settings
@@ -72,28 +64,55 @@ fn main() -> ! {
     let tx_pin = gpio0_pins.p0_1.into_af1();
     console::init(p.uart0, &mut gcr.reg, rx_pin, tx_pin, &clks.pclk);
 
-    console::write_console(b"Hello, world!\r\n");
+    unsafe {
+        console::write_async(b"Hello");
+    }
+    //console::write_console(b"Hello, world!\r\n");
 
     // Initialize the trng peripheral
-    let trng = hal::trng::Trng::new(p.trng, &mut gcr.reg);
+    //let trng = hal::trng::Trng::new(p.trng, &mut gcr.reg);
+
+    let pins = hal::gpio::Gpio2::new(p.gpio2, &mut gcr.reg).split();
+
+    let mut led_r = pins.p2_0.into_input_output();
+    let mut led_g = pins.p2_1.into_input_output();
+    let mut led_b = pins.p2_2.into_input_output();
+    // Use VDDIOH as the power source for the RGB LED pins (3.0V)
+    // Note: This HAL API may change in the future
+
+    // Initialize a delay timer using the ARM SYST (SysTick) peripheral
+    let rate = clks.sys_clk.frequency;
+
+    let mut delay = cortex_m::delay::Delay::new(core.SYST, rate);
+    led_r.set_power_vddioh();
+    led_g.set_power_vddioh();
+    led_b.set_power_vddioh();
+    for _ in 0..100 {
+        led_r.set_high();
+        led_g.set_high();
+        led_b.set_high();
+        led_r.set_low();
+        led_g.set_low();
+        led_b.set_low();
+    }
+
+    unsafe {
+        console::write_async(b"Boots");
+    }
+
 
     // Load subscription from flash memory
     flash::init(p.flc, clks);
     let mut subscriptions: [Subscription; 8] = (*load_subscriptions().as_slice()).try_into().unwrap();
 
 
+
     // Fundamental loop
     loop {
-        delay.delay_us(5u32 + (trng.gen_u32() & 511));
-        let val = console::read_resp(&mut subscriptions);
-        if val.is_some() {
-            process(val.unwrap());
-        }
+
+        //delay.delay_us(5u32 + (trng.gen_u32() & 511));
+        console::read_resp(&mut subscriptions);
     }
-}
-
-fn process(p0: &[u8]) {
-
 }
 
 fn load_subscriptions() -> Box<[Subscription; 8]> {

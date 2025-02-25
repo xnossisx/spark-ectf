@@ -1,4 +1,6 @@
-target extended-remote :50000
+file /ps/ectf/design/spark-decoder/output/thumbv7em-none-eabihf/debug/spark-decoder
+
+target extended-remote :3333
 
 # print demangled symbols
 set print asm-demangle on

@@ -6,21 +6,23 @@ publish = false
 
 [package.metadata.docs.rs]
 targets = ["thumbv7em-none-eabihf"]
-strip=true
-opt-level = "z"
+lto=true
+
+[profile.dev]
+opt-level = "s"            # Use slightly better optimizations.
+overflow-checks = false     # Disable integer overflow checks.
 lto=true
 
 [dependencies]
-cortex-m = { version = "0.7.7", features = ["critical-section-single-core"] }
-embedded-io = "0.6.1"
-embedded-hal-nb="1.0.0"
-max7800x-hal = { version = "0.6.1", features = ["rt"] }
+cortex-m = { version = "0.7.7", features = ["critical-section-single-core"], default-features = false }
+cortex-m-rt = { version = "0.7.5", features = ["set-sp", "set-vtor"], default-features = false }
+max7800x-hal = { version = "0.7.0", default-features = false }
 panic-halt = "1.0.0"
-crypto-bigint = "0.7.0-pre.0"
-rand = { version = "0.9.0", default-features = false, optional = true }
-embedded-alloc = "0.6.0"
-bytemuck = "1.21.0"
-getrandom = { version = "0.2.15", features = ["custom"] }
+crypto-bigint = { version = "0.7.0-pre.0", default-features = false }
+#rand = { version = "0.9.0", default-features = false, optional = true }
+embedded-alloc = { version = "0.6.0", default-features = false, features = ["llff"] }
+bytemuck = { version = "1.21.0", default-features=false }
+#getrandom = { version = "0.2.15", features = ["custom"] }
 
 #rug = {version = "1.27.0", features = ["integer"], default-features = false }
 #gmp-mpfr-sys = { version = "1.6.4", default-features = false, features = [ "force-cross", "use-system-libs" ] }

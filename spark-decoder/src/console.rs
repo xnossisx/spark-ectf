@@ -4,7 +4,7 @@ use core::cmp::{max, min};
 use crate::pac::Uart0;
 use core::ptr::null_mut;
 use cortex_m::asm::nop;
-use crypto_bigint::{Integer, Odd, U1024};
+use crypto_bigint::{U1024};
 use hal::gcr::clocks::{Clock, PeripheralClock};
 use hal::gcr::GcrRegisters;
 use hal::gpio::{Af1, Pin};
@@ -25,9 +25,10 @@ pub fn init(
     pclk: &Clock<PeripheralClock>,
 ) {
     unsafe {
+        if !CONSOLE_HOOK.is_null() { return }
         CONSOLE_HOOK = &mut hal::uart::UartPeripheral::uart0(uart0, reg, rx_pin, tx_pin)
             .baud(115200)
-            .clock_pclk(&pclk)
+            .clock_pclk(pclk)
             .parity(hal::uart::ParityBit::None)
             .build();
     }
@@ -62,6 +63,10 @@ pub fn write_err(bytes: &[u8]) {
     }
 }
 
+pub unsafe fn write_async(bytes: &[u8]) {
+    (*CONSOLE_HOOK).write_bytes(&bytes);
+}
+
 pub fn read_byte() -> u8 {
     unsafe {(*CONSOLE_HOOK).read_byte()}
 }
@@ -72,11 +77,11 @@ pub fn ack() {
 
 
 // Reads whatever the TV is sending over right now.
-pub fn read_resp(subscriptions: &mut [Subscription; 8]) -> Option<&'static[u8]> {
+pub fn read_resp(subscriptions: &mut [Subscription; 8]) {
     let magic = read_byte();
-    if magic != MAGIC {return None;}
+    if magic != MAGIC {return;}
     let opcode = read_byte();
-    if (opcode != b'E' || opcode != b'L' || opcode != b'S' || opcode != b'D' || opcode != b'A') {return None;}
+    if (opcode != b'E' || opcode != b'L' || opcode != b'S' || opcode != b'D' || opcode != b'A') {return;}
     let length: u16 = ((read_byte() as u16) << 8) + (read_byte() as u16);
     unsafe {
         ack();
@@ -92,20 +97,19 @@ pub fn read_resp(subscriptions: &mut [Subscription; 8]) -> Option<&'static[u8]> 
                     ret[i*20usize+16..i*20usize+24].copy_from_slice(bytemuck::bytes_of(&(subscriptions[i].end)));
                 }
                 write_comm(ret,b'L');
-                return None;
+                return;
             } else {
                 write_err(b"Alloc error");
-                return None;
+                return;
             }
 
-            return None;
         }
         let layout: Layout;
         if let Ok(l) = Layout::from_size_align(length as usize, 16) {
             layout = l;
         } else {
             write_err(b"Alloc error");
-            return None;
+            return;
         }
         let byte_list: &mut [u8] = core::slice::from_raw_parts_mut(alloc(layout), length as usize);
         for i in 0..(length >> 8) as usize {
@@ -127,7 +131,6 @@ pub fn read_resp(subscriptions: &mut [Subscription; 8]) -> Option<&'static[u8]> 
                 flash::write_bytes(pos as u32, &byte_list[pos..pos + 16384 as usize], 16384);
 
                 ack();
-                None
             }
             b'D' => {
                 let channel: u32 = *bytemuck::from_bytes(&byte_list[0..4]);
@@ -142,9 +145,8 @@ pub fn read_resp(subscriptions: &mut [Subscription; 8]) -> Option<&'static[u8]> 
                 let ret: [u8; 64] = decoded.to_be_bytes();
                 write_comm(&ret,b'D');
 
-                None
             }
-            _ => None
+            _ => return
         }
 
 
