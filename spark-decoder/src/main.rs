@@ -65,7 +65,7 @@ fn main() -> ! {
     console::init(p.uart0, &mut gcr.reg, rx_pin, tx_pin, &clks.pclk);
 
     unsafe {
-        console::write_async(b"Hello");
+        console::write_async(b"Hello\n");
     }
     //console::write_console(b"Hello, world!\r\n");
 
@@ -87,17 +87,22 @@ fn main() -> ! {
     led_r.set_power_vddioh();
     led_g.set_power_vddioh();
     led_b.set_power_vddioh();
-    for _ in 0..100 {
+    for _ in 0..10 {
         led_r.set_high();
+        delay.delay_ms(500);
         led_g.set_high();
+        delay.delay_ms(500);
         led_b.set_high();
+        delay.delay_ms(500);
         led_r.set_low();
+        delay.delay_ms(500);
         led_g.set_low();
+        delay.delay_ms(500);
         led_b.set_low();
     }
 
     unsafe {
-        console::write_async(b"Boots");
+        console::write_async(b"Boots\n");
     }
 
 
