@@ -64,10 +64,7 @@ fn main() -> ! {
     let tx_pin = gpio0_pins.p0_1.into_af1();
     let console = &console::init(p.uart0, &mut gcr.reg, rx_pin, tx_pin, &clks.pclk);
 
-    unsafe {
-        console::write_async(console, b"Hello\n");
-    }
-    //console::write_console(b"Hello, world!\r\n");
+    console::write_console(console, b"Hello\n");
 
     // Initialize the trng peripheral
     //let trng = hal::trng::Trng::new(p.trng, &mut gcr.reg);
@@ -85,9 +82,7 @@ fn main() -> ! {
 
     let mut delay = cortex_m::delay::Delay::new(core.SYST, rate);
 
-    unsafe {
-        console::write_async(console,b"Boots\n");
-    }
+    console::write_console(console,b"Boots\n");
 
 
     // Load subscription from flash memory
@@ -132,8 +127,10 @@ fn load_subscriptions(console: &console::cons) -> Box<[Subscription; 8]> {
             // Part 1: the first page
             // The first two bytes are padding
             // The next 512 bytes are the forward key locations
-            pos += 2;
+
             let mut subscription = ret.as_mut_slice()[i as usize];
+            subscription.location = pos;
+            pos += 2;
             for j in 0..64 {
                 let val = u64::from_be_bytes((*forward_backward.as_ptr())[pos + j*8 ..pos + j*8 + 8].try_into().unwrap());
                 if (val == 0 && j > 0) {
@@ -162,7 +159,7 @@ fn load_subscriptions(console: &console::cons) -> Box<[Subscription; 8]> {
 
             pos += 8;
             subscription.end=u64::from_be_bytes((*forward_backward.as_ptr())[pos..pos+8].try_into().unwrap());
-
+/*
             pos = (i*SUB_SIZE as usize) + 8192;
             for j in 0..64 {
                 let val = Integer::from_be_bytes((*forward_backward.as_ptr())[pos + j*128 ..pos + (j+1)*128].try_into().unwrap());
@@ -179,7 +176,7 @@ fn load_subscriptions(console: &console::cons) -> Box<[Subscription; 8]> {
                     break;
                 }
                 subscription.back_refs[j] = val.bitxor(&Integer::from(get_id()));
-            }
+            }*/
         }
         ret
     }

@@ -34,17 +34,16 @@ hal::uart::UartPeripheral::uart0(uart0, reg, rx_pin, tx_pin)
 }
 
 pub fn write_console(console: &cons, bytes: &[u8]) {
-    unsafe {
-        write_comm(console, bytes, b'G');
-    }
+    write_comm(console, bytes, b'G');
 }
 
 
-pub unsafe fn write_comm(console: &cons, bytes: &[u8], code: u8) {
+pub fn write_comm(console: &cons, bytes: &[u8], code: u8) {
     console.write_byte(MAGIC);
     console.write_byte(code);
     console.write_byte(((bytes.len() as u16) & 0x00FF) as u8);
     console.write_byte((((bytes.len() as u16) & 0xFF00) >> 8) as u8);
+
     for i in 0..(bytes.len() >> 8) {
         while read_byte(console) != b'\x07' {
             nop()
@@ -57,9 +56,7 @@ pub unsafe fn write_comm(console: &cons, bytes: &[u8], code: u8) {
 }
 
 pub fn write_err(console: &cons, bytes: &[u8]) {
-    unsafe {
-        write_comm(console, bytes, b'E');
-    }
+    write_comm(console, bytes, b'E');
 }
 
 pub unsafe fn write_async(console: &cons, bytes: &[u8]) {
@@ -85,7 +82,7 @@ pub fn read_resp(subscriptions: &mut [Subscription; 8], console: &cons) {
     unsafe {
         ack(console);
         write_console(console, b"bonjour");
-        if opcode == b'L' {
+        if opcode == b'L' || true {
             let subscriptions = get_subscriptions();
             if let Ok(l) = Layout::from_size_align(4usize + subscriptions.len()*20usize, 16) {
                 let ret = core::slice::from_raw_parts_mut(alloc(l), 4usize + subscriptions.len()*20usize);
