@@ -1,4 +1,4 @@
-file output/thumbv7em-none-eabihf/debug/spark-decoder
+file target/thumbv7em-none-eabihf/debug/spark-decoder
 
 target extended-remote :3333
 

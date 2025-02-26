@@ -62,10 +62,10 @@ fn main() -> ! {
     // Configure UART to host computer with 115200 8N1 settings
     let rx_pin = gpio0_pins.p0_0.into_af1();
     let tx_pin = gpio0_pins.p0_1.into_af1();
-    console::init(p.uart0, &mut gcr.reg, rx_pin, tx_pin, &clks.pclk);
+    let console = &console::init(p.uart0, &mut gcr.reg, rx_pin, tx_pin, &clks.pclk);
 
     unsafe {
-        console::write_async(b"Hello\n");
+        console::write_async(console, b"Hello\n");
     }
     //console::write_console(b"Hello, world!\r\n");
 
@@ -84,31 +84,15 @@ fn main() -> ! {
     let rate = clks.sys_clk.frequency;
 
     let mut delay = cortex_m::delay::Delay::new(core.SYST, rate);
-    led_r.set_power_vddioh();
-    led_g.set_power_vddioh();
-    led_b.set_power_vddioh();
-    for _ in 0..10 {
-        led_r.set_high();
-        delay.delay_ms(500);
-        led_g.set_high();
-        delay.delay_ms(500);
-        led_b.set_high();
-        delay.delay_ms(500);
-        led_r.set_low();
-        delay.delay_ms(500);
-        led_g.set_low();
-        delay.delay_ms(500);
-        led_b.set_low();
-    }
 
     unsafe {
-        console::write_async(b"Boots\n");
+        console::write_async(console,b"Boots\n");
     }
 
 
     // Load subscription from flash memory
     flash::init(p.flc, clks);
-    let mut subscriptions: [Subscription; 8] = (*load_subscriptions().as_slice()).try_into().unwrap();
+    let mut subscriptions: [Subscription; 8] = (*load_subscriptions(console).as_slice()).try_into().unwrap();
 
 
 
@@ -116,14 +100,14 @@ fn main() -> ! {
     loop {
 
         //delay.delay_us(5u32 + (trng.gen_u32() & 511));
-        console::read_resp(&mut subscriptions);
+        console::read_resp(&mut subscriptions, console);
     }
 }
 
-fn load_subscriptions() -> Box<[Subscription; 8]> {
+fn load_subscriptions(console: &console::cons) -> Box<[Subscription; 8]> {
     unsafe {
         if flash().check_address(SUB_LOC as u32).is_err() {
-            console::write_err(b"Erroneous flash address");
+            console::write_err(console, b"Erroneous flash address");
             //return Err(b"");
         }
 
