@@ -3,7 +3,7 @@ use core::alloc::Layout;
 use core::cmp::{max, min};
 use core::mem::MaybeUninit;
 use crate::pac::Uart0;
-use core::ptr::null_mut;
+use core::ptr::{null_mut, read_unaligned};
 use cortex_m::asm::nop;
 use crypto_bigint::{U1024};
 use hal::gcr::clocks::{Clock, PeripheralClock};
@@ -28,9 +28,11 @@ pub fn init(
     rx_pin: Pin<0, 0, Af1>,
     tx_pin: Pin<0, 1, Af1>,
     pclk: &Clock<PeripheralClock>,
-) {
+) -> u32 {
     unsafe {
-        if INIT_CONSOLE { return }
+        if INIT_CONSOLE {
+            return 0;
+        }
         CONSOLE_HOOK.write(hal::uart::UartPeripheral::uart0(uart0, reg, rx_pin, tx_pin)
             .baud(115200)
             .clock_pclk(pclk)
@@ -38,6 +40,7 @@ pub fn init(
             .build());
         INIT_CONSOLE = true;
     }
+    1
 }
 
 pub fn write_console(bytes: &[u8]) {

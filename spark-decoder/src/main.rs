@@ -64,15 +64,13 @@ fn main() -> ! {
     let tx_pin = gpio0_pins.p0_1.into_af1();
     console::init(p.uart0, &mut gcr.reg, rx_pin, tx_pin, &clks.pclk);
 
+
+    let pins = hal::gpio::Gpio2::new(p.gpio2, &mut gcr.reg).split();
+
     unsafe {
         console::write_async(b"Hello\n");
     }
-    //console::write_console(b"Hello, world!\r\n");
 
-    // Initialize the trng peripheral
-    //let trng = hal::trng::Trng::new(p.trng, &mut gcr.reg);
-
-    let pins = hal::gpio::Gpio2::new(p.gpio2, &mut gcr.reg).split();
 
     let mut led_r = pins.p2_0.into_input_output();
     let mut led_g = pins.p2_1.into_input_output();
@@ -99,10 +97,10 @@ fn main() -> ! {
         led_g.set_low();
         delay.delay_ms(500);
         led_b.set_low();
-    }
-
-    unsafe {
-        console::write_async(b"Boots\n");
+        delay.delay_ms(500);
+        unsafe {
+            console::write_async(b"Color cycle\n");
+        }
     }
 
 
