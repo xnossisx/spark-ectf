@@ -1,5 +1,6 @@
+use alloc::vec::Vec;
 use core::cell::RefCell;
-use crate::{flash, get_id, Integer, SUB_LOC};
+use crate::{flash, get_id, Integer, SUB_LOC, SUB_SIZE};
 use core::ffi::c_void;
 use core::mem::zeroed;
 use core::ops::{BitXorAssign, Not};
@@ -23,13 +24,16 @@ pub struct SubStat {
     pub(crate) end: u64,
 }
 
-pub fn get_subscriptions() -> [SubStat; 8] {
-    let mut ret: [SubStat; 8] = [SubStat{exists: false, start: 0, end: 0}; 8];
-    for i in 0..8 {
+pub fn get_subscriptions() -> Vec<SubStat> {
+    let mut ret: Vec<SubStat> = Vec::new();
+    for i in 0usize..8 {
         let mut data: [u8; 17] = [0;17];
-        let res = flash::read_bytes(((SUB_LOC as usize) + i * 8192) as u32, &mut data, 17);
-        ret[i] = SubStat{exists: (data[0] != 0), start: u64::from_be_bytes(data[1..9].split_at(core::mem::size_of::<u64>()).0.try_into().unwrap()),
-            end: u64::from_be_bytes(data[9..17].split_at(core::mem::size_of::<u64>()).0.try_into().unwrap())};
+        let res = flash::read_bytes((SUB_LOC as u32) + (i as u32) * SUB_SIZE, &mut data, 17);
+        if (data[0] == 0) || (data[0] == 0xff) { continue; }
+        ret.push(SubStat{
+            exists: (data[0] != 0 && data[0] != 0xff),
+            start: u64::from_be_bytes(data[1..9].split_at(size_of::<u64>()).0.try_into().unwrap()),
+            end: u64::from_be_bytes(data[9..17].split_at(size_of::<u64>()).0.try_into().unwrap())});
     }
     ret
 }

@@ -1,4 +1,5 @@
 use alloc::alloc::alloc;
+use alloc::string::ToString;
 use core::alloc::Layout;
 use core::cmp::{max, min};
 use core::mem::MaybeUninit;
@@ -34,9 +35,12 @@ hal::uart::UartPeripheral::uart0(uart0, reg, rx_pin, tx_pin)
 }
 
 pub fn write_console(console: &cons, bytes: &[u8]) {
-    write_comm(console, bytes, b'G');
+    console.write_byte(MAGIC);
+    console.write_byte(b'G');
+    console.write_byte(((bytes.len() as u16) & 0x00FF) as u8);
+    console.write_byte((((bytes.len() as u16) & 0xFF00) >> 8) as u8);
+    console.write_bytes(bytes);
 }
-
 
 pub fn write_comm(console: &cons, bytes: &[u8], code: u8) {
     console.write_byte(MAGIC);
@@ -44,19 +48,27 @@ pub fn write_comm(console: &cons, bytes: &[u8], code: u8) {
     console.write_byte(((bytes.len() as u16) & 0x00FF) as u8);
     console.write_byte((((bytes.len() as u16) & 0xFF00) >> 8) as u8);
 
-    for i in 0..(bytes.len() >> 8) {
-        while read_byte(console) != b'\x07' {
+    for i in 0..(bytes.len() >> 8) + 1 {
+        while read_byte(console) != b'\x25' {
             nop()
         }
-        console.write_bytes(&bytes[i<<8..min((i + 1) << 8, bytes.len() - (i << 8))]);
+        console.read_byte();
+        console.read_byte();
+        console.read_byte();
+
+        console.write_bytes(&bytes[i<<8..min((i + 1) << 8, bytes.len())]);
     }
-    while read_byte(console) != b'\x07' {
+    while read_byte(console) != b'\x25' {
         nop()
     }
+    console.read_byte();
+    console.read_byte();
+    console.read_byte();
 }
 
 pub fn write_err(console: &cons, bytes: &[u8]) {
-    write_comm(console, bytes, b'E');
+    write_console(console, bytes);
+    //write_comm(console, bytes, b'E');
 }
 
 pub unsafe fn write_async(console: &cons, bytes: &[u8]) {
@@ -68,23 +80,32 @@ pub fn read_byte(console: &cons) -> u8 {
 }
 
 pub fn ack(console: &cons) {
-    unsafe{write_comm(console, b"\x07", b'A');}
+    console.write_bytes(b"%A\x00\x00");
 }
 
 
 // Reads whatever the TV is sending over right now.
 pub fn read_resp(subscriptions: &mut [Subscription; 8], console: &cons) {
     let magic = read_byte(console);
-    if magic != MAGIC {return;}
+
+    if magic != MAGIC {
+        write_console(console, b"that was not magic");
+        return;
+    }
     let opcode = read_byte(console);
-    if (opcode != b'E' || opcode != b'L' || opcode != b'S' || opcode != b'D' || opcode != b'A') {return;}
+    if (opcode != b'E' && opcode != b'L' && opcode != b'S' && opcode != b'D' && opcode != b'A') {
+        write_console(console, b"that was not an opcode");
+        write_console(console, &[opcode]);
+        return;
+    }
     let length: u16 = ((read_byte(console) as u16) << 8) + (read_byte(console) as u16);
+    write_console(console, b"bonjour");
     unsafe {
-        ack(console);
-        write_console(console, b"bonjour");
-        if opcode == b'L' || true {
+        if opcode == b'L' {
             let subscriptions = get_subscriptions();
             if let Ok(l) = Layout::from_size_align(4usize + subscriptions.len()*20usize, 16) {
+                write_console(console, subscriptions.len().to_string().as_bytes());
+
                 let ret = core::slice::from_raw_parts_mut(alloc(l), 4usize + subscriptions.len()*20usize);
                 ret[0..4].copy_from_slice(bytemuck::bytes_of(&(subscriptions.len() as u32)));
                 //ret[0..4] = bytemuck::try_cast(&(subscriptions.len() as u32)).unwrap();
@@ -108,9 +129,15 @@ pub fn read_resp(subscriptions: &mut [Subscription; 8], console: &cons) {
             write_err(console, b"Alloc error");
             return;
         }
+
         let byte_list: &mut [u8] = core::slice::from_raw_parts_mut(alloc(layout), length as usize);
+        ack(console);
         for i in 0..(length >> 8) as usize {
-            console.read_bytes(get_range(byte_list, i, length));
+            //console.read_bytes(get_range(byte_list, i, length));
+            for byte in &mut *byte_list {
+                *byte = console.read_byte();
+                write_console(console, b"got one");
+            }
             ack(console);
         }
 
