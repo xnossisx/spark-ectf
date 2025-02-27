@@ -114,7 +114,6 @@ fn load_subscriptions(console: &console::cons) -> [Subscription; 8] {
             let mut back_size = 0;
 
             let mut pos: usize = (i*SUB_SIZE as usize);
-            console::write_console(console, b"welp\n");
             let result = flash().check_address(SUB_LOC as u32 + pos as u32);
             if result.is_err() {
                 match result.unwrap_err() {
@@ -193,7 +192,6 @@ fn load_subscriptions(console: &console::cons) -> [Subscription; 8] {
         ret
     }
 }
-
 fn get_id() -> u32 {
     env!("DECODER_ID").parse::<u32>().unwrap()
 }

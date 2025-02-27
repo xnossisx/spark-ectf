@@ -48,7 +48,7 @@ pub fn write_comm(console: &cons, bytes: &[u8], code: u8) {
     console.write_byte(((bytes.len() as u16) & 0x00FF) as u8);
     console.write_byte((((bytes.len() as u16) & 0xFF00) >> 8) as u8);
 
-    for i in 0..(bytes.len() >> 8) + 1 {
+    for i in 0..((bytes.len() + 255) >> 8) {
         while read_byte(console) != b'\x25' {
             nop()
         }
@@ -98,8 +98,10 @@ pub fn read_resp(subscriptions: &mut [Subscription; 8], console: &cons) {
         write_console(console, &[opcode]);
         return;
     }
-    let length: u16 = ((read_byte(console) as u16) << 8) + (read_byte(console) as u16);
-    write_console(console, b"bonjour");
+    let length: u16 = (read_byte(console) as u16) + ((read_byte(console) as u16) << 8);
+    /*let opcode: u8 = b'S';
+    let length: u16 = 5;
+    */write_console(console, b"bonjour");
     unsafe {
         if opcode == b'L' {
             let subscriptions = get_subscriptions();
@@ -130,31 +132,23 @@ pub fn read_resp(subscriptions: &mut [Subscription; 8], console: &cons) {
             return;
         }
 
-        let byte_list: &mut [u8] = core::slice::from_raw_parts_mut(alloc(layout), length as usize);
         ack(console);
-        for i in 0..(length >> 8) as usize {
+        let byte_list: &mut [u8] = core::slice::from_raw_parts_mut(alloc(layout), length as usize);
+        write_console(console, ((length + 255) >> 8).to_string().as_bytes());
+
+        for i in 0..((length + 255) >> 8) {
             //console.read_bytes(get_range(byte_list, i, length));
             for byte in &mut *byte_list {
                 *byte = console.read_byte();
-                write_console(console, b"got one");
             }
             ack(console);
         }
 
         match opcode {
             b'S' => {
-                let channel: u32 = *bytemuck::from_bytes(&byte_list[0..4]);
-                let start: u64 = *bytemuck::from_bytes(&byte_list[4..12]);
-                let end: u64 = *bytemuck::from_bytes(&byte_list[12..20]);
-
-                let mut pos: usize = SUB_LOC as usize + channel as usize * SUB_SIZE as usize + 2;
-
-                flash::write_bytes(pos as u32, &byte_list[pos..pos + 1172 as usize], 1172);
-
-                pos = SUB_LOC as usize + (channel as usize * SUB_SIZE as usize) + 8192;
-                flash::write_bytes(pos as u32, &byte_list[pos..pos + 16384 as usize], 16384);
-
-                ack(console);
+                let channel: u32 = *bytemuck::from_bytes(&byte_list[2 + 1024 + 128..2 + 1024 + 128 + 4]);
+                let mut pos: usize = SUB_LOC as usize + channel as usize * SUB_SIZE as usize;
+                flash::write_bytes(pos as u32, &byte_list, SUB_SIZE as usize);
             }
             b'D' => {
                 let channel: u32 = *bytemuck::from_bytes(&byte_list[0..4]);
