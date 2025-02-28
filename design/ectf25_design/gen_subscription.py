@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import hashlib
 from sympy import isprime
+import gmpy2
 
 from loguru import logger
 
@@ -23,18 +24,23 @@ def get_primes_starting_with(start, amount):
 
 def wind_encoder(root, target, exponents, modulus):
     result = root
-    for bit in range(63, -1, -1):
-        if (1 << bit) & target > 0:
-            result = pow(exponents[bit], result, modulus)
+    for section in range(15, -1, -1):
+        mask = (1 << (section * 4)) * 15 
+        times = (mask & target) >> (section * 4)
+        for i in range(times):
+            result = gmpy2.powmod(exponents[section], result, modulus)
     return result
 
-
 def next_required_intermediate(start):
-    last = 64
-    for bit in range(63, -1, -1):
-        if (1 << bit) & start > 0:
-            last = bit
-    return start + (1 << last)
+    complement = 0
+    for section in range(15, -1, -1):
+        # Round up the range
+        bit = (1 << (section * 4))
+        mask = bit * 15 
+        common = mask & start
+        if common != 0:
+            complement = mask - common + bit
+    return start + complement
 
 
 def get_intermediates(start, end, root, exponents, modulus):
@@ -58,7 +64,7 @@ def pack_intermediates(intermediates: dict):
     for position in positions:
         res += intermediates[position].to_bytes(128, byteorder="big")
     # Pack the remainder of the 8192 bytes
-    for _ in range(8192 - len(positions) * 128):
+    for _ in range(2048 - len(positions) * 128):
         res += b"\x00"
     return res
 
@@ -67,8 +73,8 @@ def pack_inter_positions(intermediates: dict):
     positions = sorted(intermediates.keys())
     for position in positions:
         res += position.to_bytes(8, byteorder="big")
-    # Pack the remainder of the 512 bytes
-    for _ in range(512 - len(positions) * 8):
+    # Pack the remainder of the 128 bytes
+    for _ in range(128 - len(positions) * 8):
         res += b"\x00"
     return res
 
@@ -79,7 +85,7 @@ def pack_metadata(channel: int, modulus: int, start: int, end: int, forward_inte
         modulus.to_bytes(128, byteorder='big') + \
         start.to_bytes(8, byteorder='big') + end.to_bytes(8, byteorder='big')
     
-    for _ in range(8192 - len(res)):
+    for _ in range(2048 - len(res)):
         res += b"\x00"
     return res
 
