@@ -85,7 +85,8 @@ def pack_metadata(channel: int, modulus: int, start: int, end: int, forward_inte
         modulus.to_bytes(128, byteorder='big') + \
         start.to_bytes(8, byteorder='big') + end.to_bytes(8, byteorder='big')
     
-    for _ in range(2048 - len(res)):
+    print(len(res))
+    for _ in range(512 - len(res)):
         res += b"\x00"
     return res
 

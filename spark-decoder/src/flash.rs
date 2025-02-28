@@ -1,16 +1,12 @@
-use alloc::fmt::format;
-use alloc::format;
-use alloc::string::ToString;
-use core::any::Any;
 use core::mem::MaybeUninit;
-use crate::pac::Flc;
-use core::ptr::null_mut;
 use core::result::Result::Err;
 use hal::flc::FlashError;
 use hal::gcr::clocks::SystemClockResults;
-use crate::console;
+use hal::pac::Flc;
 use crate::console::cons;
 
+
+static mut FLASH_HANDLE: &hal::flc::Flc = &MaybeUninit::zeroed();
 // Core reference to our flash (initially uninitialized)
 const FLASH_HANDLE: MaybeUninit<hal::flc::Flc> = MaybeUninit::uninit();
 

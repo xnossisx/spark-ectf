@@ -2,6 +2,7 @@
 #![no_std]
 #![no_main]
 
+use cortex_m::asm::delay;
 use alloc::fmt::format;
 use alloc::format;
 use alloc::string::ToString;
@@ -27,12 +28,10 @@ mod subscription;
 
 extern crate alloc;
 pub extern crate max7800x_hal as hal;
-const NUM_IND: i32 = 16;
-const SUB_SIZE: u32 = 8192 * 3; /*two keys + key lengths + modulus + channel + start + end*/
+const SUB_SIZE: u32 = 8192; /*two keys + key lengths + modulus + channel + start + end*/
 pub use hal::entry;
 use hal::flc::FlashError;
 pub use hal::pac;
-// pick a panicking behavior
 use flash::flash;
 use crate::console::cons;
 use crate::subscription::Subscription;
@@ -188,23 +187,23 @@ fn load_subscription(subscription: &mut Subscription, console: &cons, channel_po
 
         pos += 2;
 
-        for j in 0..64 {
+        for j in 0..16 {
             let val = u64::from_be_bytes((*cache.as_ptr())[pos + j*8 ..pos + j*8 + 8].try_into().unwrap());
             if (val == 0 && j > 0) {
                 break;
             }
             subscription.forward_pos[j] = val;
         }
-        pos += 512;
+        pos += 128;
 
-        for j in 0..64 {
+        for j in 0..16 {
             let val = u64::from_be_bytes((*cache.as_ptr())[pos + j*8 ..pos + j*8 + 8].try_into().unwrap());
             if (val == 0 && j > 0) {
                 break;
             }
             subscription.backward_pos[j] = val;
         }
-        pos += 512;
+        pos += 128;
         console::write_console(console, format!("{:#x}", subscription.channel).as_bytes());
 
         console::write_console(console, b"hook");
