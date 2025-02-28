@@ -107,10 +107,12 @@ class Encoder:
         #  security requirements
         def wind_encoder(root, target, exponents, modulus):
             result = root
-            for bit in range(63, -1, -1):
-                if (1 << bit) & target > 0:
-                    result = gmpy2.powmod(exponents[bit], result, modulus)
-                return result
+            for section in range(15, -1, -1):
+                mask = (1 << (section * 4)) * 15 
+                times = (mask & target) >> (section * 4)
+                for i in range(times):
+                    result = gmpy2.powmod(exponents[section], result, modulus)
+            return result
         
         forward_root = self.secrets[str(channel)]["forward"]
         backward_root = self.secrets[str(channel)]["backward"]
