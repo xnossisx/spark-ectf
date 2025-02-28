@@ -5,12 +5,14 @@
 use alloc::fmt::format;
 use alloc::format;
 use alloc::string::ToString;
-use hal::pac::Trng;
+use hal::trng::Trng;
 use core::alloc::GlobalAlloc;
 use core::cell::RefCell;
 use core::panic::PanicInfo;
-use crypto_bigint::{Encoding, Odd, U1024};
+use cortex_m::delay::Delay;
+use crypto_bigint::{Encoding, Odd, Zero, U1024};
 use embedded_alloc::LlffHeap;
+use hmac_sha512;
 
 type Integer = U1024;
 type Heap = LlffHeap;
@@ -90,8 +92,6 @@ fn main() -> ! {
 
     let mut delay = cortex_m::delay::Delay::new(core.SYST, rate);
 
-
-
     // Load subscription from flash memory
     flash::init(p.flc, clks);
     let mut subscriptions: [Subscription; 8] = load_subscriptions(console);
@@ -106,8 +106,8 @@ fn main() -> ! {
         let test_val = trng.gen_u32();
 
         //
-        let output = test(test_val, trng);
-        if test_val ** 2 == output {
+        let output = test(test_val, &trng, &mut delay);
+        if test_val*test_val == output {
             console::read_resp(&mut subscriptions, console);
         }
     }
@@ -116,8 +116,8 @@ fn main() -> ! {
 /**
  * Likely to be exposed to data corruption, thereby allowing us to detect interference
  */
-fn test(scan: u32, trng: Trng) {
-    let ret = scan**2;
+fn test(scan: u32, trng: &Trng, delay: &mut Delay) -> u32 {
+    let ret = scan*scan;
     delay.delay_us(5u32 + (trng.gen_u32() & 511));
     return ret
 }
@@ -167,8 +167,8 @@ fn load_subscription(subscription: &mut Subscription, console: &cons, channel_po
             FlashError::NeedsErase => {
                 console::write_console(console, b"NeedsErase\n");
             }
-        }
-        false
+        };
+        return false
     }
     unsafe {
         console::write_console(console, b"started");
@@ -211,8 +211,6 @@ fn load_subscription(subscription: &mut Subscription, console: &cons, channel_po
         subscription.n=Odd::<Integer>::new(Integer::from_be_bytes((*cache.as_ptr())[pos ..pos + 128].try_into().unwrap())).unwrap();
         pos += 128;
 
-
-
         subscription.start=u64::from_be_bytes((*cache.as_ptr())[pos..pos+8].try_into().unwrap());
         pos += 8;
         subscription.end=u64::from_be_bytes((*cache.as_ptr())[pos..pos+8].try_into().unwrap());
@@ -226,6 +224,19 @@ fn load_subscription(subscription: &mut Subscription, console: &cons, channel_po
  */
 fn get_id() -> u32 {
     env!("DECODER_ID").parse::<u32>().unwrap()
+}
+
+///Outputs the SHA-3 hash of the device ID
+static mut HASH: Integer = Integer::ZERO;
+fn get_hashed_id() -> &'static Integer {
+    unsafe {
+        if HASH.is_zero().into() {
+            let output: [u8;128]=[0; 128];
+            output.copy_from_slice(&hmac_sha512::Hash::hash(get_id().to_be_bytes().as_ref()));
+            HASH = Integer::from_be_bytes(output);
+        }
+        &HASH
+    }
 }
 
 fn get_channels() -> [u32; 9] {

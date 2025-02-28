@@ -12,14 +12,14 @@ use crate::console;
 use crate::console::cons;
 
 // Core reference to our flash (initially uninitialized)
-const FLASH_HANDLE: MaybeUninit<*mut hal::flc::Flc> = MaybeUninit::uninit();
+const FLASH_HANDLE: MaybeUninit<hal::flc::Flc> = MaybeUninit::uninit();
 
 /**
  * Gets a reference to the flash controller
  * @output: An immutable flash controller reference
  */
 pub fn flash() -> &'static hal::flc::Flc {
-    unsafe { & *FLASH_HANDLE.as_mut_ptr() }
+    unsafe { FLASH_HANDLE.assume_init_ref() }
 }
 
 /**
@@ -29,7 +29,7 @@ pub fn flash() -> &'static hal::flc::Flc {
  */
 pub fn init(p: Flc, clks: SystemClockResults) {
     unsafe {
-        FLASH_HANDLE = &mut hal::flc::Flc::new(p, clks.sys_clk);
+        FLASH_HANDLE.write(hal::flc::Flc::new(p, clks.sys_clk));
     }
 }
 
@@ -88,7 +88,7 @@ pub fn write_bytes<'a>(dst: u32, from: &[u8], len: usize, console: &cons) -> Res
             unsafe {
                 // Performs write
                 let bytes: [u32; 4]  = *((from.as_ptr() as usize + i * 16) as *const [u32; 4]);
-                let res = (*FLASH_HANDLE).write_128(addr_128_ptr, &bytes);
+                let res = FLASH_HANDLE.assume_init_ref().write_128(addr_128_ptr, &bytes);
                 // Checks for errors
                 if res.is_err() {
                     return Err(map_err(res.unwrap_err()).as_bytes());

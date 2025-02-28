@@ -13,3 +13,5 @@ target/
 .vscode/
 
 .idea/
+/insecure.bin
+/5a.bin

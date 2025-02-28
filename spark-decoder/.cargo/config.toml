@@ -45,3 +45,4 @@ target-dir = "./target"
 
 [env]
 DECODER_ID="0xdeadbeef"
+CHANNELS="0"

@@ -190,7 +190,7 @@ pub fn read_resp(subscriptions: &mut [Subscription; 8], console: &cons) {
                                 }
                             }
                             &0
-                        }));
+                        });
                         pos = SUB_LOC as usize + (channel as usize * SUB_SIZE as usize);
                     } else {
                         pos += 256;

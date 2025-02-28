@@ -1,12 +1,12 @@
 use alloc::vec::Vec;
 use core::cell::RefCell;
-use crate::{flash, get_id, Integer, SUB_LOC, SUB_SIZE};
+use crate::{flash, get_hashed_id, get_id, Integer, SUB_LOC, SUB_SIZE};
 use core::ffi::c_void;
 use core::mem::zeroed;
 use core::ops::{BitXorAssign, Not};
 use core::ptr::{null, null_mut};
 use crypto_bigint::{Encoding, Int, Odd, U1024, U512, U8192};
-use crypto_bigint::modular::{MontyForm, MontyParams};
+use crypto_bigint::modular::{montgomery_reduction, MontyForm, MontyParams};
 use hal::flc::FLASH_PAGE_SIZE;
 use hal::pac::dvs::Mon;
 
@@ -26,6 +26,7 @@ pub struct SubStat {
     pub(crate) end: u64,
 }
 
+/// Loads subscription listings from flash memory
 pub fn get_subscriptions() -> Vec<SubStat> {
     let mut ret: Vec<SubStat> = Vec::new();
     for i in 0usize..8 {
@@ -72,8 +73,7 @@ impl Subscription {
         let intermediate_buffer: RefCell<[u8; 128]> = RefCell::new([0; 128]);
         unsafe {
             let _ = flash::read_bytes(ref_location, &mut (*intermediate_buffer.as_ptr())[0..128], 128);
-            let val = Integer::from_be_bytes((*intermediate_buffer.as_ptr()).try_into().unwrap());
-            val
+            Integer::from_be_bytes((*intermediate_buffer.as_ptr()).try_into().unwrap()).bitxor(get_hashed_id())
         }
     }
 
@@ -87,7 +87,7 @@ impl Subscription {
             if *idx_ref > target {
                 break;
             }
-            if *idx_ref > closest_pos as u64 {
+            if *idx_ref > closest_pos {
                 closest_pos = *idx_ref;
                 closest_idx = i;
             }
@@ -97,11 +97,11 @@ impl Subscription {
 
         // Takes the result to be the top exponent of a power tower of primes
 
-        let mask_combo = target-closest_idx;
+        let mask_combo = target-closest_idx as u64;
         let mut idx_nibble = 15;
         loop {
             let mask = (1 << (idx_nibble << 2)) * 15;
-            let distance = ((mask & mask_combo)) >> (idx_nibble << 2);
+            let distance = (mask & mask_combo) >> (idx_nibble << 2);
             for i in 0..distance {
                 let monty = MontyForm::new(&Integer::from(PRIMES[idx_nibble]), MontyParams::new(self.n)).pow(&result);
                 result = monty.retrieve();
