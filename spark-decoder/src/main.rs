@@ -2,11 +2,12 @@
 #![no_std]
 #![no_main]
 
-use alloc::boxed::Box;
+use alloc::format;
 use alloc::string::ToString;
-use core::alloc::{GlobalAlloc, Layout};
+use core::alloc::GlobalAlloc;
 use core::cell::RefCell;
-use crypto_bigint::{Encoding, Int, Odd, U1024};
+use core::panic::PanicInfo;
+use crypto_bigint::{Encoding, Odd, U1024};
 use embedded_alloc::LlffHeap;
 
 type Integer = U1024;
@@ -27,17 +28,16 @@ const SUB_SIZE: u32 = 8192 * 3; /*two keys + key lengths + modulus + channel + s
 pub use hal::entry;
 use hal::flc::FlashError;
 pub use hal::pac;
-use hal::pac::gpio0::In;
 // pick a panicking behavior
-use panic_halt as _;
 use flash::flash;
+use crate::console::cons;
 use crate::subscription::Subscription;
 // you can put a breakpoint on `rust_begin_unwind` to catch panics
 // use panic_itm as _; // logs messages over ITM; requires ITM support
 // use panic_semihosting as _; // logs messages to the host stderr; requires a debugger
 // use cortex_m_semihosting::heprintln; // uncomment to use this for printing through semihosting
 
-pub const SUB_LOC: *const u8 = 0x10020000 as *const u8;
+pub const SUB_LOC: *const u8 = 0x1001f000 as *const u8;
 #[entry]
 fn main() -> ! {
     {
@@ -98,100 +98,95 @@ fn main() -> ! {
 }
 
 fn load_subscriptions(console: &console::cons) -> [Subscription; 8] {
-    unsafe {
-
 
         // Page 1: Modulus, Channel, Start, End, Forward Count, Backward Count
         // Page 2: Forward exponents, Backward exponents
         let mut ret = [Subscription::new(); 8];
 
         //let layout = Layout::from_size_align((SUB_SIZE * 8) as usize, 8).unwrap();
-        let mut forward_backward: RefCell<[u8; 2048 as usize]> = RefCell::new([0; 2048 as usize]);
         //let mut forward_backward: *mut u8 = alloc(layout);
         for i in 0usize..8 {
-            //let mut sub_data = [0u8; 8192];
-            let mut for_size = 0;
-            let mut back_size = 0;
-
-            let mut pos: usize = (i*SUB_SIZE as usize);
-            let result = flash().check_address(SUB_LOC as u32 + pos as u32);
-            if result.is_err() {
-                match result.unwrap_err() {
-                    FlashError::InvalidAddress => {
-                        console::write_console(console, b"InvalidAddress\n");
-                    }
-                    FlashError::AccessViolation => {
-                        console::write_console(console, b"InvalidOperation\n");
-                    }
-                    FlashError::NeedsErase => {
-                        console::write_console(console, b"NeedsErase\n");
-                    }
-
-                }
-            }
-            let _ = flash::read_bytes(SUB_LOC as u32 + pos as u32, &mut (*forward_backward.as_ptr()), 2048 as usize);
-            let init = (*forward_backward.as_ptr())[0];
-            if init == 0 || init == 0xFF {
+            if !load_subscription(&mut ret[i], console, i) {
                 break;
             }
-            // Part 1: the first page
-            // The first two bytes are padding
-            // The next 512 bytes are the forward key locations
-
-            let mut subscription = ret.as_mut_slice()[i as usize];
-
-            subscription.location = pos;
-            pos += 2;
-            for j in 0..64 {
-                let val = u64::from_be_bytes((*forward_backward.as_ptr())[pos + j*8 ..pos + j*8 + 8].try_into().unwrap());
-                if (val == 0 && j > 0) {
-                    break;
-                }
-                subscription.forward_pos[j] = val;
-            }
-
-            pos += 512;
-            for j in 0..64 {
-                let val = u64::from_be_bytes((*forward_backward.as_ptr())[pos + j*8 ..pos + j*8 + 8].try_into().unwrap());
-                if (val == 0 && j > 0) {
-                    break;
-                }
-                subscription.backward_pos[j] = val;
-            }
-
-            pos += 512;
-            subscription.n=Odd::<Integer>::new(Integer::from_be_bytes((*forward_backward.as_ptr())[pos ..pos + 128].try_into().unwrap())).unwrap();
-
-            pos += 128;
-            subscription.channel=u32::from_be_bytes((*forward_backward.as_ptr())[pos..pos+4].try_into().unwrap());
-
-            pos += 4;
-            subscription.start=u64::from_be_bytes((*forward_backward.as_ptr())[pos..pos+8].try_into().unwrap());
-
-            pos += 8;
-            subscription.end=u64::from_be_bytes((*forward_backward.as_ptr())[pos..pos+8].try_into().unwrap());
-/*
-            pos = (i*SUB_SIZE as usize) + 8192;
-            for j in 0..64 {
-                let val = Integer::from_be_bytes((*forward_backward.as_ptr())[pos + j*128 ..pos + (j+1)*128].try_into().unwrap());
-                if val == Integer::ZERO && j > 0 {
-                    break;
-                }
-                subscription.forward_refs[j] = val;
-            }
-
-            pos = (i*SUB_SIZE as usize) + 16384;
-            for j in 0..64 {
-                let val = Integer::from_be_bytes((*forward_backward.as_ptr())[pos + j*128 ..pos + (j+1)*128].try_into().unwrap());
-                if val == Integer::ZERO && j > 0 {
-                    break;
-                }
-                subscription.back_refs[j] = val.bitxor(&Integer::from(get_id()));
-            }*/
         }
         ret
-    }
 }
+
+fn load_subscription(subscription: &mut Subscription, console: &cons, channel_pos: usize) -> bool {
+    let cache: RefCell<[u8; 2048 as usize]> = RefCell::new([0; 2048 as usize]);
+    let mut pos: usize = (channel_pos * SUB_SIZE as usize);
+    let result = flash().check_address(SUB_LOC as u32 + pos as u32);
+    if result.is_err() {
+        match result.unwrap_err() {
+            FlashError::InvalidAddress => {
+                console::write_console(console, b"InvalidAddress\n");
+            }
+            FlashError::AccessViolation => {
+                console::write_console(console, b"InvalidOperation\n");
+            }
+            FlashError::NeedsErase => {
+                console::write_console(console, b"NeedsErase\n");
+            }
+
+        }
+    }
+    unsafe {
+        console::write_console(console, b"started");
+        let _ = flash::read_bytes(SUB_LOC as u32 + pos as u32, &mut (*cache.as_ptr()), 2048 as usize);
+        console::write_console(console, b"read");
+
+        let init = (*cache.as_ptr())[4]; // Should always be non-zero if it's loaded right
+        if init == 0 || init == 0xFF {
+            return false;
+        } else {
+            console::write_console(console, &[init]);
+        }
+
+        subscription.location = pos;
+        subscription.channel=u32::from_be_bytes((*cache.as_ptr())[pos..pos+4].try_into().unwrap());
+        pos += 4;
+
+        pos += 2;
+
+        for j in 0..64 {
+            let val = u64::from_be_bytes((*cache.as_ptr())[pos + j*8 ..pos + j*8 + 8].try_into().unwrap());
+            if (val == 0 && j > 0) {
+                break;
+            }
+            subscription.forward_pos[j] = val;
+        }
+        pos += 512;
+
+        for j in 0..64 {
+            let val = u64::from_be_bytes((*cache.as_ptr())[pos + j*8 ..pos + j*8 + 8].try_into().unwrap());
+            if (val == 0 && j > 0) {
+                break;
+            }
+            subscription.backward_pos[j] = val;
+        }
+        pos += 512;
+        console::write_console(console, format!("{:#x}", subscription.channel).as_bytes());
+
+        console::write_console(console, b"hook");
+        subscription.n=Odd::<Integer>::new(Integer::from_be_bytes((*cache.as_ptr())[pos ..pos + 128].try_into().unwrap())).unwrap();
+        pos += 128;
+
+
+
+        subscription.start=u64::from_be_bytes((*cache.as_ptr())[pos..pos+8].try_into().unwrap());
+        pos += 8;
+        subscription.end=u64::from_be_bytes((*cache.as_ptr())[pos..pos+8].try_into().unwrap());
+    }
+
+    true
+}
+
 fn get_id() -> u32 {
     env!("DECODER_ID").parse::<u32>().unwrap()
+}
+
+#[panic_handler]
+fn panic(_info: &PanicInfo) -> ! {
+    loop {}
 }

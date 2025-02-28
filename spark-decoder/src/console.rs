@@ -1,4 +1,5 @@
 use alloc::alloc::alloc;
+use alloc::format;
 use alloc::string::ToString;
 use core::alloc::Layout;
 use core::cmp::{max, min};
@@ -11,7 +12,7 @@ use hal::gcr::clocks::{Clock, PeripheralClock};
 use hal::gcr::GcrRegisters;
 use hal::gpio::{Af1, Pin};
 use hal::uart::BuiltUartPeripheral;
-use crate::{flash, SUB_LOC, SUB_SIZE};
+use crate::{flash, load_subscription, SUB_LOC, SUB_SIZE};
 use crate::subscription::{get_subscriptions, Subscription};
 
 static MAGIC: u8 = b'%';
@@ -72,8 +73,11 @@ pub fn write_comm(console: &cons, bytes: &[u8], code: u8) {
 }
 
 pub fn write_err(console: &cons, bytes: &[u8]) {
-    write_console(console, bytes);
-    //write_comm(console, bytes, b'E');
+    console.write_byte(MAGIC);
+    console.write_byte(b'E');
+    console.write_byte(((bytes.len() as u16) & 0x00FF) as u8);
+    console.write_byte((((bytes.len() as u16) & 0xFF00) >> 8) as u8);
+    console.write_bytes(bytes);
 }
 
 pub unsafe fn write_async(console: &cons, bytes: &[u8]) {
@@ -137,25 +141,65 @@ pub fn read_resp(subscriptions: &mut [Subscription; 8], console: &cons) {
             return;
         }
 
-        ack(console);
-        let byte_list: &mut [u8] = core::slice::from_raw_parts_mut(alloc(layout), length as usize);
-        write_console(console, ((length + 255) >> 8).to_string().as_bytes());
-
-        for i in 0..((length + 255) >> 8) {
-            //console.read_bytes(get_range(byte_list, i, length));
-            for byte in &mut *byte_list {
-                *byte = console.read_byte();
-            }
-            ack(console);
-        }
 
         match opcode {
             b'S' => {
+                ack(console);
+                let byte_list: &mut [u8] = &mut [0; 256];
+                let mut pos = 0;
+                for i in 0..((length + 255) >> 8) {
+                    //console.read_bytes(get_range(byte_list, i, length));
+                    for byte in &mut *byte_list {
+                        *byte = console.read_byte();
+                    }
+                    if (i == 0) {
+                        let channel: u32 = *bytemuck::try_from_bytes(&byte_list[0..4]).unwrap_or_else(|test| {
+                            match test {
+                                bytemuck::PodCastError::AlignmentMismatch => {
+                                    write_console(console, b"AlignmentMismatch");
+                                }
+                                bytemuck::PodCastError::SizeMismatch => {
+                                    write_console(console, b"SizeMismatch");
+                                }
+                                bytemuck::PodCastError::TargetAlignmentGreaterAndInputNotAligned => {
+                                    write_console(console, b"TargetAlignmentGreaterAndInputNotAligned");
+                                }
+                                bytemuck::PodCastError::OutputSliceWouldHaveSlop => {
+                                    write_console(console, b"OutputSliceWouldHaveSlop");
+                                }
+                            }
+                            &0
+                        });
+                        pos = SUB_LOC as usize + channel as usize * SUB_SIZE as usize;
+                        write_console(console, format!("Writing to 0x{:x}", pos).as_bytes());
+                    } else {
+                        pos += 256;
+                    }
+                    flash::write_bytes(pos as u32, &byte_list, 256).unwrap_or_else(|test| {
+                        write_err(console, test);
+                    });
+                    ack(console);
+                }
+
+
                 let channel: u32 = *bytemuck::from_bytes(&byte_list[2 + 1024 + 128..2 + 1024 + 128 + 4]);
-                let mut pos: usize = SUB_LOC as usize + channel as usize * SUB_SIZE as usize;
-                flash::write_bytes(pos as u32, &byte_list, SUB_SIZE as usize);
+                let pos: usize = SUB_LOC as usize + channel as usize * SUB_SIZE as usize;
+                write_console(console, format!{"0x{:x}", pos}.as_bytes());
+                load_subscription(&mut subscriptions[pos], console, pos);
+                write_comm(console, b"",b'S');
             }
             b'D' => {
+                let byte_list: &mut [u8] = core::slice::from_raw_parts_mut(alloc(layout), length as usize);
+                write_console(console, ((length + 255) >> 8).to_string().as_bytes());
+
+                for i in 0..((length + 255) >> 8) {
+                    //console.read_bytes(get_range(byte_list, i, length));
+                    for byte in &mut *byte_list {
+                        *byte = console.read_byte();
+                    }
+                    ack(console);
+                }
+
                 let channel: u32 = *bytemuck::from_bytes(&byte_list[0..4]);
                 let timestamp: u64 = *bytemuck::from_bytes(&byte_list[4..12]);
                 let frame: U1024 = <crate::Integer>::from_be_slice(byte_list[12..140].try_into().unwrap()); // 128 bytes

@@ -74,8 +74,9 @@ def pack_inter_positions(intermediates: dict):
 
 def pack_metadata(channel: int, modulus: int, start: int, end: int, forward_inters: dict, backward_inters: dict):
     res = len(forward_inters).to_bytes(1, byteorder='big') + len(backward_inters).to_bytes(1, byteorder='big') + \
+    	channel.to_bytes(4, byteorder='big') + \
         pack_inter_positions(forward_inters) + pack_inter_positions(backward_inters) + \
-        modulus.to_bytes(128, byteorder='big') + channel.to_bytes(4, byteorder='big') + \
+        modulus.to_bytes(128, byteorder='big') + \
         start.to_bytes(8, byteorder='big') + end.to_bytes(8, byteorder='big')
     
     for _ in range(8192 - len(res)):
