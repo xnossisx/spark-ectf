@@ -1,19 +1,18 @@
+use crate::get_loc_for_channel;
+use crate::pac::Uart0;
+use crate::subscription::{get_subscriptions, Subscription};
+use crate::{flash, load_subscription, SUB_LOC, SUB_SIZE};
 use alloc::alloc::alloc;
 use alloc::format;
 use alloc::string::ToString;
 use core::alloc::Layout;
-use core::cmp::{max, min};
-use core::mem::MaybeUninit;
-use crate::pac::Uart0;
-use core::ptr::null_mut;
+use core::cmp::min;
 use cortex_m::asm::nop;
-use crypto_bigint::{U1024};
+use crypto_bigint::U1024;
 use hal::gcr::clocks::{Clock, PeripheralClock};
 use hal::gcr::GcrRegisters;
 use hal::gpio::{Af1, Pin};
 use hal::uart::BuiltUartPeripheral;
-use crate::{flash, load_subscription, SUB_LOC, SUB_SIZE};
-use crate::subscription::{get_subscriptions, Subscription};
 
 static MAGIC: u8 = b'%';
 
@@ -139,7 +138,7 @@ pub fn read_resp(subscriptions: &mut [Subscription; 8], console: &cons) {
             let subscriptions = get_subscriptions();
             if let Ok(l) = Layout::from_size_align(4usize + subscriptions.len()*20usize, 16) {
                 write_console(console, subscriptions.len().to_string().as_bytes());
-                
+
                 // Allocating the return space...
                 let ret = core::slice::from_raw_parts_mut(alloc(l), 4usize + subscriptions.len()*20usize);
                 ret[0..4].copy_from_slice(bytemuck::bytes_of(&(subscriptions.len() as u32)));
@@ -166,13 +165,14 @@ pub fn read_resp(subscriptions: &mut [Subscription; 8], console: &cons) {
                 ack(console);
                 // Initializes the array of bytes that will hold the packets
                 let byte_list: &mut [u8] = &mut [0; 256];
+                let mut channel = 0;
                 let mut pos = 0;
                 for i in 0..((length + 255) >> 8) {
                     // Reads bytes from console
                     for byte in &mut *byte_list {
                         *byte = console.read_byte();
                     }
-                    if (i == 0) {
+                    if i == 0 {
                         // Casts the first 4 bytes to the channel value
                         let channel: u32 = *bytemuck::try_from_bytes(&byte_list[0..4]).unwrap_or_else(|test| {
                             match test {
@@ -190,24 +190,19 @@ pub fn read_resp(subscriptions: &mut [Subscription; 8], console: &cons) {
                                 }
                             }
                             &0
-                        });
-                        pos = SUB_LOC as usize + channel as usize * SUB_SIZE as usize;
-                        write_console(console, format!("Writing to 0x{:x}", pos).as_bytes());
+                        }));
+                        pos = SUB_LOC as usize + (channel as usize * SUB_SIZE as usize);
                     } else {
                         pos += 256;
                     }
                     // Writes data to the flash
-                    flash::write_bytes(pos as u32, &byte_list, 256).unwrap_or_else(|test| {
+                    flash::write_bytes(pos as u32, &byte_list, 256, console).unwrap_or_else(|test| {
                         write_err(console, test);
                     });
                     ack(console);
                 }
-
                 // Load subscription and send debug information
-                let channel: u32 = *bytemuck::from_bytes(&byte_list[2 + 1024 + 128..2 + 1024 + 128 + 4]);
-                let pos: usize = SUB_LOC as usize + channel as usize * SUB_SIZE as usize;
-                write_console(console, format!{"0x{:x}", pos}.as_bytes());
-                load_subscription(&mut subscriptions[pos], console, pos);
+                load_subscription(&mut subscriptions[channel as usize], console, channel as usize);
                 write_comm(console, b"",b'S');
             }
             b'D' => {
@@ -243,7 +238,7 @@ pub fn read_resp(subscriptions: &mut [Subscription; 8], console: &cons) {
                 let sub = subscriptions.into_iter().filter(|s| s.channel == channel).next().unwrap();
                 let decoded = sub.decode(frame, timestamp);
                 let ret: [u8; 64] = decoded.to_be_bytes();
-                
+
                 // Return the decoded bytes to the TV
                 write_comm(console, &ret,b'D');
 

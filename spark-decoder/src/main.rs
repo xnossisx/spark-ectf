@@ -2,6 +2,7 @@
 #![no_std]
 #![no_main]
 
+use alloc::fmt::format;
 use alloc::format;
 use alloc::string::ToString;
 use hal::pac::Trng;
@@ -80,7 +81,7 @@ fn main() -> ! {
     // Initialize the trng peripheral
     let trng = Trng::new(p.trng, &mut gcr.reg);
 
-    
+
     // Use VDDIOH as the power source for the RGB LED pins (3.0V)
     // Note: This HAL API may change in the future
 
@@ -99,7 +100,7 @@ fn main() -> ! {
 
     // Fundamental event loop
     loop {
-        // 
+        //
         console::write_console(console,b"!\n");
         // Delays to avoid side channel attacks
         let test_val = trng.gen_u32();
@@ -153,6 +154,7 @@ fn load_subscriptions(console: &console::cons) -> [Subscription; 8] {
 fn load_subscription(subscription: &mut Subscription, console: &cons, channel_pos: usize) -> bool {
     let cache: RefCell<[u8; 2048 as usize]> = RefCell::new([0; 2048 as usize]);
     let mut pos: usize = (channel_pos * SUB_SIZE as usize);
+    console::write_console(console, format!("{:x}", (SUB_LOC as u32) + pos as u32).as_bytes());
     let result = flash().check_address(SUB_LOC as u32 + pos as u32);
     if result.is_err() {
         match result.unwrap_err() {
@@ -164,7 +166,7 @@ fn load_subscription(subscription: &mut Subscription, console: &cons, channel_po
             }
             FlashError::NeedsErase => {
                 console::write_console(console, b"NeedsErase\n");
-            } 
+            }
         }
         false
     }
@@ -224,6 +226,31 @@ fn load_subscription(subscription: &mut Subscription, console: &cons, channel_po
  */
 fn get_id() -> u32 {
     env!("DECODER_ID").parse::<u32>().unwrap()
+}
+
+fn get_channels() -> [u32; 9] {
+    let mut ret: [u32; 9] = [0; 9];
+    // Unfortunately, Rust does not let you put format strings into environment variables.
+    ret[0] = 0;
+    // Get the channels from the environment variable CHANNELS, which is like "1,3,7,8" or something
+    let channels = env!("CHANNELS");
+    let mut i = 1;
+    for channel in channels.split(",") {
+        ret[i] = channel.parse::<u32>().unwrap();
+        i += 1;
+    }
+
+    ret
+}
+
+fn get_loc_for_channel(channel: u32) -> u32 {
+    let channels = get_channels();
+    for i in 0..channels.len() {
+        if channels[i] == channel {
+            return i as u32;
+        }
+    }
+    0
 }
 
 
