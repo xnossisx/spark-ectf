@@ -10,12 +10,14 @@ use crypto_bigint::modular::{MontyForm, MontyParams};
 use hal::flc::FLASH_PAGE_SIZE;
 use hal::pac::dvs::Mon;
 
+/// Indicate test keys to protect against tampering
 const FORWARD: u64 = 0x1f8c25d4b902e785;
 const BACKWARD: u64 = 0xf329d3e6bb90fcc5;
 
 // First 64 primes after 1024
 const PRIMES: [u32; 64] = [1031,1033,1039,1049,1051,1061,1063,1069,1087,1091,1093,1097,1103,1109,1117,1123,1129,1151,1153,1163,1171,1181,1187,1193,1201,1213,1217,1223,1229,1231,1237,1249,1259,1277,1279,1283,1289,1291,1297,1301,1303,1307,1319,1321,1327,1361,1367,1373,1381,1399,1409,1423,1427,1429,1433,1439,1447,1451,1453,1459,1471,1481,1483,1487];
 
+/// Represents a subscription listing
 #[derive(Copy)]
 #[derive(Clone)]
 pub struct SubStat {
@@ -80,6 +82,7 @@ impl Subscription {
         let mut closest_pos: u64 = 0;
         let mut closest_idx: usize = 0;
 
+        // Finds the intermediate closest to the target
         for (i, idx_ref) in pos.iter().enumerate() {
             if *idx_ref > target {
                 break;
@@ -92,16 +95,21 @@ impl Subscription {
 
         let mut result: Integer = self.get_intermediate(closest_idx, dir);
 
-        let mut idx_bit = 63;
+        // Takes the result to be the top exponent of a power tower of primes
+
+        let mask_combo = target-closest_idx;
+        let mut idx_nibble = 15;
         loop {
-            if (1 << idx_bit) & target > 0 && (1 << idx_bit) & closest_pos == 0 {
-                let monty = MontyForm::new(&Integer::from(PRIMES[idx_bit]), MontyParams::new(self.n)).pow(&result);
+            let mask = (1 << (idx_nibble << 2)) * 15;
+            let distance = ((mask & mask_combo)) >> (idx_nibble << 2);
+            for i in 0..distance {
+                let monty = MontyForm::new(&Integer::from(PRIMES[idx_nibble]), MontyParams::new(self.n)).pow(&result);
                 result = monty.retrieve();
             }
-            if (idx_bit == 0) {
+            if (idx_nibble == 0) {
                 break;
             }
-            idx_bit -= 1;
+            idx_nibble -= 1;
         }
 
         result

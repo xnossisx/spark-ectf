@@ -16,3 +16,8 @@ spark-decoder/.cargo/
 secrets/*
 subscriptions/*
 design/ectf25_design/__pycache__/*
+
+
+# Added by cargo
+
+/target
