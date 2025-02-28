@@ -1,13 +1,6 @@
 """
-Author: Ben Janis
+Author: Samuel Lipsutz
 Date: 2025
-
-This source file is part of an example system for MITRE's 2025 Embedded System CTF
-(eCTF). This code is being provided only for educational purposes for the 2025 MITRE
-eCTF competition, and may not meet MITRE standards for quality. Use this code at your
-own risk!
-
-Copyright: Copyright (c) 2025 The MITRE Corporation
 """
 
 import argparse
@@ -15,6 +8,7 @@ import json
 from pathlib import Path
 
 from loguru import logger
+import rsa
 
 
 def gen_secrets(channels: list[int]) -> bytes:
@@ -35,10 +29,22 @@ def gen_secrets(channels: list[int]) -> bytes:
     # Create the secrets object
     # You can change this to generate any secret material
     # The secrets file will never be shared with attackers
-    secrets = {
-        "channels": channels,
-        "some_secrets": "EXAMPLE",
-    }
+
+    channels.append(0)  # Add the broadcast channel
+    secrets = {}
+
+    for channel in channels:
+        secrets[channel] = {}
+        (public, private) = rsa.newkeys(1024)
+
+        modulus = public.n
+        secrets[channel]["modulus"] = modulus
+        secrets[channel]["p"] = private.p
+        secrets[channel]["q"] = private.q
+
+        secrets[channel]["forward"] = rsa.randnum.read_random_int(1024)
+        secrets[channel]["backward"] = rsa.randnum.read_random_int(1024)
+
 
     # NOTE: if you choose to use JSON for your file type, you will not be able to
     # store binary data, and must either use a different file type or encode the

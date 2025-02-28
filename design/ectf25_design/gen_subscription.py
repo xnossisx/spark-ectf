@@ -23,9 +23,9 @@ def get_primes_starting_with(start, amount):
 
 def wind_encoder(root, target, exponents, modulus):
     result = root
-    for bit in range(0, 64):
+    for bit in range(63, -1, -1):
         if (1 << bit) & target > 0:
-            result = pow(result, exponents[bit], modulus)
+            result = pow(exponents[bit], result, modulus)
     return result
 
 
@@ -46,19 +46,41 @@ def get_intermediates(start, end, root, exponents, modulus):
             break
     return intermediates
 
-def get_intermediates_hashed(start, end, root, exponents, modulus, device_hash):
+def get_intermediates_hashed(start, end, root, exponents, modulus, device_hash: bytes):
     intermediates = get_intermediates(start, end, root, exponents, modulus)
     for i in intermediates:
-        intermediates[i] = (intermediates[i] ^ device_hash) % modulus
+        intermediates[i] = (intermediates[i] ^ int.from_bytes(device_hash, byteorder='big')) % modulus
     return intermediates
 
 def pack_intermediates(intermediates: dict):
     res = b""
     positions = sorted(intermediates.keys())
     for position in positions:
-        res += position.to_bytes(8, byteorder="big")
+        res += intermediates[position].to_bytes(128, byteorder="big")
+    # Pack the remainder of the 8192 bytes
+    for _ in range(8192 - len(positions) * 128):
+        res += b"\x00"
+    return res
+
+def pack_inter_positions(intermediates: dict):
+    res = b""
+    positions = sorted(intermediates.keys())
     for position in positions:
-        res += intermediates[position].to_bytes(64, byteorder="big")
+        res += position.to_bytes(8, byteorder="big")
+    # Pack the remainder of the 512 bytes
+    for _ in range(512 - len(positions) * 8):
+        res += b"\x00"
+    return res
+
+def pack_metadata(channel: int, modulus: int, start: int, end: int, forward_inters: dict, backward_inters: dict):
+    res = len(forward_inters).to_bytes(1, byteorder='big') + len(backward_inters).to_bytes(1, byteorder='big') + \
+    	channel.to_bytes(4, byteorder='big') + \
+        pack_inter_positions(forward_inters) + pack_inter_positions(backward_inters) + \
+        modulus.to_bytes(128, byteorder='big') + \
+        start.to_bytes(8, byteorder='big') + end.to_bytes(8, byteorder='big')
+    
+    for _ in range(8192 - len(res)):
+        res += b"\x00"
     return res
 
 def gen_subscription(
@@ -76,11 +98,11 @@ def gen_subscription(
     """
     secrets = json.loads(secrets)
 
-    modulus = secrets["modulus"]
+    modulus = secrets[str(channel)]["modulus"]
     exponents = get_primes_starting_with(1025, 16)
 
-    forward = secrets["sub" + channel]["forward"]
-    backward = secrets["sub" + channel]["backward"]
+    forward = secrets[str(channel)]["forward"]
+    backward = secrets[str(channel)]["backward"]
 
     end_of_time = 2**64 - 1
     forward_inters = get_intermediates(start, end, forward, exponents, modulus)
@@ -88,9 +110,8 @@ def gen_subscription(
     # Finally, we pack this like follows:
     
     # Pack the subscription. This will be sent to the decoder with ectf25.tv.subscribe
-    return pack_intermediates(forward_inters) + pack_intermediates(backward_inters) + \
-        modulus.to_bytes(64, byteorder='big') + channel.to_bytes(4, byteorder='big') + \
-        start.to_bytes(8, byteorder='big') + end.to_bytes(8, byteorder='big')
+    return pack_metadata(channel, modulus, start, end, forward_inters, backward_inters) + \
+        pack_intermediates(forward_inters) + pack_intermediates(backward_inters)
 
 def parse_args():
     """Define and parse the command line arguments
@@ -146,6 +167,7 @@ def main():
 
     # For your own debugging. Feel free to remove
     logger.success(f"Wrote subscription to {str(args.subscription_file.absolute())}")
+    print(len(subscription))
 
 
 if __name__ == "__main__":

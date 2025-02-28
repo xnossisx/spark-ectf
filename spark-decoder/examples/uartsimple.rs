@@ -2,12 +2,9 @@
 #![no_main]
 
 pub extern crate max7800x_hal as hal;
-pub use hal::entry;
 pub use hal::pac;
-use rand::prelude::*;
-
-// embedded_io API allows usage of core macros like `write!`
-use embedded_io::Write;
+pub use hal::entry;
+use panic_halt as _;
 
 #[entry]
 fn main() -> ! {
@@ -27,7 +24,12 @@ fn main() -> ! {
     // Configure UART to host computer with 115200 8N1 settings
     let rx_pin = gpio0_pins.p0_0.into_af1();
     let tx_pin = gpio0_pins.p0_1.into_af1();
-    let mut console = hal::uart::UartPeripheral::uart0(p.uart0, &mut gcr.reg, rx_pin, tx_pin)
+    let console = hal::uart::UartPeripheral::uart0(
+        p.uart0,
+        &mut gcr.reg,
+        rx_pin,
+        tx_pin
+    )
         .baud(115200)
         .clock_pclk(&clks.pclk)
         .parity(hal::uart::ParityBit::None)
@@ -36,16 +38,7 @@ fn main() -> ! {
     // You can use the HAL API directly (format strings not supported)...
     console.write_bytes(b"Hello, world!\r\n");
     // ... or you can use the embedded_io API (format strings supported)!
-    let answer = 42;
-    write!(console, "The answer is {}\r\n", answer).unwrap();
 
-    // Test countdown with UART and delay
-    let mut countdown = 10;
-    while countdown >= 0 {
-        write!(console, "{}\r\n", countdown).unwrap();
-        delay.delay_ms(1000);
-        countdown -= 1;
-    }
 
     // UART echo loop
     loop {
