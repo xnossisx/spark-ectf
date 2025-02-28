@@ -98,14 +98,14 @@ def gen_subscription(
     secrets = json.loads(secrets)
 
     modulus = secrets[str(channel)]["modulus"]
-    exponents = get_primes_starting_with(1025, 64)
+    exponents = get_primes_starting_with(1025, 16)
 
     forward = secrets[str(channel)]["forward"]
     backward = secrets[str(channel)]["backward"]
 
     end_of_time = 2**64 - 1
     forward_inters = get_intermediates(start, end, forward, exponents, modulus)
-    backward_inters = get_intermediates_hashed(end_of_time - end, end_of_time - start, forward, exponents, modulus, hashlib.sha3_512(device_id.to_bytes(4)).digest())
+    backward_inters = get_intermediates_hashed(end_of_time - end, end_of_time - start, backward, exponents, modulus, hashlib.sha3_512(device_id.to_bytes(4)).digest())
     # Finally, we pack this like follows:
     
     # Pack the subscription. This will be sent to the decoder with ectf25.tv.subscribe
