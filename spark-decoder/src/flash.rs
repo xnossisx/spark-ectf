@@ -2,9 +2,9 @@ use core::mem::MaybeUninit;
 use core::result::Result::Err;
 use hal::flc::FlashError;
 use hal::gcr::clocks::SystemClockResults;
-use hal::pac::Flc;
+use hal::pac::Peripherals;
 use crate::console::cons;
-
+use crate::pac::Flc;
 
 // Core reference to our flash (initially uninitialized)
 const FLASH_HANDLE: MaybeUninit<hal::flc::Flc> = MaybeUninit::uninit();
@@ -22,9 +22,9 @@ pub fn flash() -> &'static hal::flc::Flc {
  * @param p: A flash controller
  * @param clks: The system clock data
  */
-pub fn init(p: Flc, clks: SystemClockResults) {
+pub fn init(flc: Flc, clks: SystemClockResults) -> hal::flc::Flc {
     unsafe {
-        FLASH_HANDLE.write(hal::flc::Flc::new(p, clks.sys_clk));
+        hal::flc::Flc::new(flc, clks.sys_clk)
     }
 }
 
@@ -35,7 +35,7 @@ pub fn init(p: Flc, clks: SystemClockResults) {
 /// @param len: The size of the bytes to be read
 /// @output: An error message or nothing
 ///
-pub fn read_bytes(frm: u32, dst: &mut [u8], len: usize) -> Result<(), &[u8]> {
+pub fn read_bytes<'a>(fsh: &hal::flc::Flc, frm: u32, dst: &mut [u8], len: usize) -> Result<(), &'a[u8]> {
     // Checks that the slice has enough space
     if dst.len() < len {
         return Err(b"FlashError::LowSpace");
@@ -51,7 +51,7 @@ pub fn read_bytes(frm: u32, dst: &mut [u8], len: usize) -> Result<(), &[u8]> {
             // Security guarantee: We have checked the address already
             unsafe {
                 // Collects the result and checks it for errors
-                let res = flash().read_128(addr_128_ptr);
+                let res = fsh.read_128(addr_128_ptr);
                 if res.is_err() {
                     return Err(b"FlashError::ReadFailed");
                 }
@@ -68,7 +68,7 @@ pub fn read_bytes(frm: u32, dst: &mut [u8], len: usize) -> Result<(), &[u8]> {
 /// dst: A u32 representing the start address of the write location in flash memory
 /// from: The slice of bytes being written
 /// len: The length of the bytes that will be written
-pub fn write_bytes<'a>(dst: u32, from: &[u8], len: usize, console: &cons) -> Result<(), &'a [u8]> {
+pub fn write_bytes<'a>(fsh: &hal::flc::Flc, dst: u32, from: &[u8], len: usize) -> Result<(), &'a [u8]> {
     if from.len() < len {
         return Err(b"FlashError::LowSpace");
     }
@@ -83,7 +83,7 @@ pub fn write_bytes<'a>(dst: u32, from: &[u8], len: usize, console: &cons) -> Res
             unsafe {
                 // Performs write
                 let bytes: [u32; 4]  = *((from.as_ptr() as usize + i * 16) as *const [u32; 4]);
-                let res = FLASH_HANDLE.assume_init_ref().write_128(addr_128_ptr, &bytes);
+                let res = fsh.write_128(addr_128_ptr, &bytes);
                 // Checks for errors
                 if res.is_err() {
                     return Err(map_err(res.unwrap_err()).as_bytes());
@@ -91,6 +91,7 @@ pub fn write_bytes<'a>(dst: u32, from: &[u8], len: usize, console: &cons) -> Res
             }
         }
     }
+
 
     Ok(())
 }
