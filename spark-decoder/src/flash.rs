@@ -6,7 +6,6 @@ use hal::pac::Flc;
 use crate::console::cons;
 
 
-static mut FLASH_HANDLE: &hal::flc::Flc = &MaybeUninit::zeroed();
 // Core reference to our flash (initially uninitialized)
 const FLASH_HANDLE: MaybeUninit<hal::flc::Flc> = MaybeUninit::uninit();
 

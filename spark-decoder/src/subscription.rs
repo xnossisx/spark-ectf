@@ -46,8 +46,8 @@ pub fn get_subscriptions() -> Vec<SubStat> {
 #[derive(Clone)]
 pub struct Subscription {
     pub(crate) n: Odd<Integer>,
-    pub(crate) forward_pos: [u64; 64],
-    pub(crate) backward_pos: [u64; 64],
+    pub(crate) forward_pos: [u64; 16],
+    pub(crate) backward_pos: [u64; 16],
     pub(crate) start: u64,
     pub(crate) end: u64,
     pub(crate) channel: u32,

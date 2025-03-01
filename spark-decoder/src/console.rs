@@ -1,4 +1,4 @@
-use crate::get_loc_for_channel;
+use crate::{get_channels, get_loc_for_channel};
 use crate::pac::Uart0;
 use crate::subscription::{get_subscriptions, Subscription};
 use crate::{flash, load_subscription, SUB_LOC, SUB_SIZE};
@@ -17,6 +17,8 @@ use hal::uart::BuiltUartPeripheral;
 static MAGIC: u8 = b'%';
 
 pub(crate) type cons = BuiltUartPeripheral<Uart0, Pin<0, 0, Af1>, Pin<0, 1, Af1>, (), ()>;
+
+
 
 /// Initializes the UART0 console.
 /// @param uart0: A reference to the uart 0 system.
@@ -174,7 +176,7 @@ pub fn read_resp(subscriptions: &mut [Subscription; 8], console: &cons) {
                     }
                     if i == 0 {
                         // Casts the first 4 bytes to the channel value
-                        let channel: u32 = *bytemuck::try_from_bytes(&byte_list[0..4]).unwrap_or_else(|test| {
+                        let channel: u32 = get_loc_for_channel(*bytemuck::try_from_bytes(&byte_list[0..4]).unwrap_or_else(|test| {
                             match test {
                                 bytemuck::PodCastError::AlignmentMismatch => {
                                     write_console(console, b"AlignmentMismatch");
@@ -190,7 +192,7 @@ pub fn read_resp(subscriptions: &mut [Subscription; 8], console: &cons) {
                                 }
                             }
                             &0
-                        });
+                        }));
                         pos = SUB_LOC as usize + (channel as usize * SUB_SIZE as usize);
                     } else {
                         pos += 256;
@@ -203,6 +205,7 @@ pub fn read_resp(subscriptions: &mut [Subscription; 8], console: &cons) {
                 }
                 // Load subscription and send debug information
                 load_subscription(&mut subscriptions[channel as usize], console, channel as usize);
+                write_console(console, env!("CHANNELS").as_bytes());
                 write_comm(console, b"",b'S');
             }
             b'D' => {
