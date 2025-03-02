@@ -2,6 +2,7 @@
 #![no_std]
 #![no_main]
 
+use cortex_m::asm::delay;
 use alloc::fmt::format;
 use alloc::format;
 use alloc::string::ToString;
@@ -27,12 +28,10 @@ mod subscription;
 
 extern crate alloc;
 pub extern crate max7800x_hal as hal;
-const NUM_IND: i32 = 16;
-const SUB_SIZE: u32 = 8192 * 3; /*two keys + key lengths + modulus + channel + start + end*/
+const SUB_SIZE: u32 = 8192; /*two keys + key lengths + modulus + channel + start + end*/
 pub use hal::entry;
 use hal::flc::FlashError;
 pub use hal::pac;
-// pick a panicking behavior
 use flash::flash;
 use crate::console::cons;
 use crate::subscription::Subscription;
@@ -171,12 +170,11 @@ fn load_subscription(subscription: &mut Subscription, console: &cons, channel_po
         return false
     }
     unsafe {
-        console::write_console(console, b"started");
         let _ = flash::read_bytes(SUB_LOC as u32 + pos as u32, &mut (*cache.as_ptr()), 2048 as usize);
-        console::write_console(console, b"read");
 
         let init = (*cache.as_ptr())[4]; // Should always be non-zero if it's loaded right
         if init == 0 || init == 0xFF {
+            console::write_console(console, b"huh\n");
             return false;
         } else {
             console::write_console(console, &[init]);
@@ -188,23 +186,23 @@ fn load_subscription(subscription: &mut Subscription, console: &cons, channel_po
 
         pos += 2;
 
-        for j in 0..64 {
+        for j in 0..16 {
             let val = u64::from_be_bytes((*cache.as_ptr())[pos + j*8 ..pos + j*8 + 8].try_into().unwrap());
             if (val == 0 && j > 0) {
                 break;
             }
             subscription.forward_pos[j] = val;
         }
-        pos += 512;
+        pos += 128;
 
-        for j in 0..64 {
+        for j in 0..16 {
             let val = u64::from_be_bytes((*cache.as_ptr())[pos + j*8 ..pos + j*8 + 8].try_into().unwrap());
             if (val == 0 && j > 0) {
                 break;
             }
             subscription.backward_pos[j] = val;
         }
-        pos += 512;
+        pos += 128;
         console::write_console(console, format!("{:#x}", subscription.channel).as_bytes());
 
         console::write_console(console, b"hook");
@@ -231,7 +229,7 @@ static mut HASH: Integer = Integer::ZERO;
 fn get_hashed_id() -> &'static Integer {
     unsafe {
         if HASH.is_zero().into() {
-            let output: [u8;128]=[0; 128];
+            let mut output: [u8;128]=[0; 128];
             output.copy_from_slice(&hmac_sha512::Hash::hash(get_id().to_be_bytes().as_ref()));
             HASH = Integer::from_be_bytes(output);
         }
@@ -241,7 +239,6 @@ fn get_hashed_id() -> &'static Integer {
 
 fn get_channels() -> [u32; 9] {
     let mut ret: [u32; 9] = [0; 9];
-    // Unfortunately, Rust does not let you put format strings into environment variables.
     ret[0] = 0;
     // Get the channels from the environment variable CHANNELS, which is like "1,3,7,8" or something
     let channels = env!("CHANNELS");

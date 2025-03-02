@@ -46,8 +46,8 @@ pub fn get_subscriptions() -> Vec<SubStat> {
 #[derive(Clone)]
 pub struct Subscription {
     pub(crate) n: Odd<Integer>,
-    pub(crate) forward_pos: [u64; 64],
-    pub(crate) backward_pos: [u64; 64],
+    pub(crate) forward_pos: [u64; 16],
+    pub(crate) backward_pos: [u64; 16],
     pub(crate) start: u64,
     pub(crate) end: u64,
     pub(crate) channel: u32,
@@ -58,8 +58,8 @@ impl Subscription {
     pub fn new() -> Subscription {
         Subscription {
             n: Odd::new(Integer::ONE).unwrap(),
-            forward_pos: [0; 64],
-            backward_pos: [0; 64],
+            forward_pos: [0; 16],
+            backward_pos: [0; 16],
             start: 0,
             end: 0,
             channel: 0,
@@ -68,7 +68,7 @@ impl Subscription {
     }
 
     pub fn get_intermediate(&self, pos: usize, dir: u64) -> Integer {
-        let ref_location = if dir == FORWARD {self.location + 8192 + pos * 128} else {self.location + 16384 + pos * 128};
+        let ref_location = if dir == FORWARD {self.location + 512 + pos * 128} else {self.location + 2560 + pos * 128};
         let ref_location = ref_location as u32;
         let intermediate_buffer: RefCell<[u8; 128]> = RefCell::new([0; 128]);
         unsafe {
