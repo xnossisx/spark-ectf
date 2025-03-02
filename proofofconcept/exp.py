@@ -1,6 +1,7 @@
 from gmpy2 import *
 import rsa
 import time
+import functools
 
 from gmpy2 import gmpy2
 from gmpy2.gmpy2 import mpz
@@ -16,11 +17,16 @@ def powmod(a, b, modulus, prime_1, prime_2):
 
     return gmpy2.f_mod(m_2 + (sub * prime_2), modulus)
 
-def powmod_plus(a, b, modulus):
-    if gmpy2.bit_length(b) > 48:
-        x = gmpy2.isqrt(b)
-        y = b-gmpy2.square(x)
-        return gmpy2.f_mod(powmod_plus(powmod_plus(a,x,modulus),x,modulus)*powmod_plus(a,y,modulus))
+def powmod_plus(a, b, modulus, sqrt_cache=[],depth=0):
+    if gmpy2.bit_length(b) > 52:
+        x,y=0
+        if len(sqrt_cache) < depth:
+            x = gmpy2.isqrt(b)
+            y = b-gmpy2.square(x)
+            sqrt_cache.append((x,y))
+        else:
+            x,y = sqrt_cache[depth]
+        return gmpy2.f_mod(powmod_plus(powmod_plus(a,x,modulus, sqrt_cache, depth+1),x,modulus, sqrt_cache, depth+1)*powmod_plus(a,y,modulus))
     else:
         return gmpy2.powmod(a, b, modulus)
 
@@ -53,12 +59,12 @@ p, q = priv.p, priv.q
 
 print()
 time_s3 = time.time()
-for i in range(0,1000):
-    x = powmod_plus(a - i, b.e, modulus)
+for i in range(0,240000):
+    x = gmpy2.powmod(a - i, b.e, modulus)
     #if i == 0:
         # print(x)
 te_3 = time.time() - time_s3
-print(te_3)
+print("thousand",te_3)
 print()
 time_s2 = time.time()
 print (powmod(a+8,b.e,modulus,p,q))
