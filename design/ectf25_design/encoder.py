@@ -32,23 +32,6 @@ def extended_gcd(a, b):
         x = y1
         y = x1 - (a // b) * y1
         return g, x, y
-    
-def modular_inverse(a, m):
-    """
-    Calculates the modular inverse of a modulo m using the Extended Euclidean Algorithm.
-
-    Args:
-      a: The integer for which to find the inverse.
-      m: The modulus.
-
-    Returns:
-      The modular inverse of a modulo m, or None if it doesn't exist.
-    """
-    g, x, y = extended_gcd(a, m)
-    if g != 1:
-        return None  # Inverse doesn't exist if a and m are not coprime
-    else:
-        return x % m
 
 def fletcher32(bytes):
     a = list(bytes)
@@ -107,11 +90,14 @@ class Encoder:
         #  security requirements
         def wind_encoder(root, target, exponents, modulus):
             result = root
+            total = 0
             for section in range(15, -1, -1):
                 mask = (1 << (section * 4)) * 15 
                 times = (mask & target) >> (section * 4)
                 for i in range(times):
                     result = gmpy2.powmod(exponents[section], result, modulus)
+                total += times
+            print(total)
             return result
         
         forward_root = self.secrets[str(channel)]["forward"]
@@ -119,13 +105,16 @@ class Encoder:
         modulus = self.secrets[str(channel)]["modulus"]
         totient = (self.secrets[str(channel)]["p"] - 1) * (self.secrets[str(channel)]["q"] - 1)
         end_of_time = 2**64 - 1
+        start = time.time()
         forward = wind_encoder(forward_root, timestamp, self.exponents, modulus)
         backward = wind_encoder(backward_root, end_of_time - timestamp, self.exponents, modulus)
+        end = time.time() - start
+        print("Time taken: ", end)
 
         guard = forward ^ backward
-        guard_inverse = modular_inverse(guard, totient)
-
-        encoded = pow(int.from_bytes(frame), guard_inverse, modulus).to_bytes(128, byteorder="big")
+        guard_inverse = gmpy2.invert(65537, totient)
+        
+        encoded = pow(int.from_bytes(frame) ^ guard, guard_inverse, modulus).to_bytes(128, byteorder="big")
         
         checksum = fletcher32(frame).to_bytes(4, byteorder="big")
         return struct.pack("<IQ", channel, timestamp) + encoded + checksum
@@ -150,10 +139,7 @@ def main():
 
     encoder = Encoder(args.secrets.read())
     
-    start = time.time()
     print(repr(encoder.encode(args.channel, args.frame.encode(), args.timestamp)))
-    end = time.time() - start
-    print("Time taken: ", end)
 
 
 if __name__ == "__main__":
