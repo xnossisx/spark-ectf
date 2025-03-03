@@ -7,7 +7,8 @@ use core::ops::{BitXorAssign, Not};
 use core::ptr::{null, null_mut};
 use crypto_bigint::{Encoding, Int, Odd, U1024, U512, U8192};
 use crypto_bigint::modular::{montgomery_reduction, MontyForm, MontyParams};
-use hal::flc::FLASH_PAGE_SIZE;
+use hal;
+use hal::flc::{Flc, FLASH_PAGE_SIZE};
 use hal::pac::dvs::Mon;
 
 /// Indicate test keys to protect against tampering
@@ -27,11 +28,11 @@ pub struct SubStat {
 }
 
 /// Loads subscription listings from flash memory
-pub fn get_subscriptions() -> Vec<SubStat> {
+pub fn get_subscriptions(flash: &hal::flc::Flc) -> Vec<SubStat> {
     let mut ret: Vec<SubStat> = Vec::new();
     for i in 0usize..8 {
         let mut data: [u8; 17] = [0;17];
-        let res = flash::read_bytes((SUB_LOC as u32) + (i as u32) * SUB_SIZE, &mut data, 17);
+        let res = flash::read_bytes(flash, (SUB_LOC as u32) + (i as u32) * SUB_SIZE, &mut data, 17);
         if (data[0] == 0) || (data[0] == 0xff) { continue; }
         ret.push(SubStat{
             exists: (data[0] != 0 && data[0] != 0xff),
@@ -67,17 +68,17 @@ impl Subscription {
         }
     }
 
-    pub fn get_intermediate(&self, pos: usize, dir: u64) -> Integer {
+    pub fn get_intermediate(&self, flash: &hal::flc::Flc, pos: usize, dir: u64) -> Integer {
         let ref_location = if dir == FORWARD {self.location + 512 + pos * 128} else {self.location + 2560 + pos * 128};
         let ref_location = ref_location as u32;
         let intermediate_buffer: RefCell<[u8; 128]> = RefCell::new([0; 128]);
         unsafe {
-            let _ = flash::read_bytes(ref_location, &mut (*intermediate_buffer.as_ptr())[0..128], 128);
+            let _ = flash::read_bytes(flash, ref_location, &mut (*intermediate_buffer.as_ptr())[0..128], 128);
             Integer::from_be_bytes((*intermediate_buffer.as_ptr()).try_into().unwrap()).bitxor(get_hashed_id())
         }
     }
 
-    pub fn decode_side(&self, target: u64, dir: u64) -> Integer {
+    pub fn decode_side(&self, flash: &hal::flc::Flc, target: u64, dir: u64) -> Integer {
         let pos = if dir == FORWARD {&self.forward_pos} else if dir == BACKWARD {&self.backward_pos} else {return Integer::ZERO};
         let mut closest_pos: u64 = 0;
         let mut closest_idx: usize = 0;
@@ -93,7 +94,7 @@ impl Subscription {
             }
         }
 
-        let mut result: Integer = self.get_intermediate(closest_idx, dir);
+        let mut result: Integer = self.get_intermediate(&flash, closest_idx, dir);
 
         // Takes the result to be the top exponent of a power tower of primes
 
@@ -115,9 +116,9 @@ impl Subscription {
         result
     }
 
-    pub fn decode(&self, target: Integer, timestamp: u64) -> U512 {
-        let forward = self.decode_side(timestamp, FORWARD);
-        let backward = self.decode_side(!timestamp, BACKWARD); // Technically passing in 2^64 - timestamp
+    pub fn decode(&self, flash: &hal::flc::Flc, target: Integer, timestamp: u64) -> U512 {
+        let forward = self.decode_side(flash, FORWARD, timestamp);
+        let backward = self.decode_side(flash, !timestamp, BACKWARD); // Technically passing in 2^64 - timestamp
 
         let guard = forward.bitxor(&backward);
         (&MontyForm::new(&target, MontyParams::new(self.n)).pow(&guard).retrieve()).into()

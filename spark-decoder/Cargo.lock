@@ -246,6 +246,7 @@ dependencies = [
  "cortex-m-rt",
  "crypto-bigint",
  "embedded-alloc",
+ "embedded-io",
  "hmac-sha512",
  "max7800x-hal",
  "panic-halt",

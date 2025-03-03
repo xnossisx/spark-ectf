@@ -23,6 +23,7 @@ crypto-bigint = { version = "0.7.0-pre.0", default-features = false }
 embedded-alloc = { version = "0.6.0", default-features = false, features = ["llff"] }
 bytemuck = { version = "1.21.0", default-features=false }
 hmac-sha512 = "1.1.6"
+embedded-io = "0.6.1"
 #getrandom = { version = "0.2.15", features = ["custom"] }
 
 #rug = {version = "1.27.0", features = ["integer"], default-features = false }

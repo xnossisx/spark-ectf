@@ -2,8 +2,6 @@
 #![no_std]
 #![no_main]
 
-use cortex_m::asm::delay;
-use alloc::fmt::format;
 use alloc::format;
 use alloc::string::ToString;
 use hal::trng::Trng;
@@ -33,7 +31,7 @@ pub use hal::entry;
 use hal::flc::FlashError;
 pub use hal::pac;
 use flash::flash;
-use crate::console::cons;
+use crate::console::{cons, console, write_console};
 use crate::subscription::Subscription;
 // you can put a breakpoint on `rust_begin_unwind` to catch panics
 // use panic_itm as _; // logs messages over ITM; requires ITM support
@@ -71,7 +69,7 @@ fn main() -> ! {
     // Configure UART to host computer with 115200 8N1 settings
     let rx_pin = gpio0_pins.p0_0.into_af1();
     let tx_pin = gpio0_pins.p0_1.into_af1();
-    let console = &console::init(p.uart0, &mut gcr.reg, rx_pin, tx_pin, &clks.pclk);
+    &console::init(p.uart0, &mut gcr.reg, rx_pin, tx_pin, &clks.pclk);
 
     let pins = hal::gpio::Gpio2::new(p.gpio2, &mut gcr.reg).split();
 
@@ -89,25 +87,41 @@ fn main() -> ! {
     // Initialize a delay timer using the ARM SYST (SysTick) peripheral
     let rate = clks.sys_clk.frequency;
 
-    let mut delay = cortex_m::delay::Delay::new(core.SYST, rate);
+    let mut delay = Delay::new(core.SYST, rate);
 
     // Load subscription from flash memory
-    flash::init(p.flc, clks);
-    let mut subscriptions: [Subscription; 8] = load_subscriptions(console);
+    let flash = flash::init(p.flc, clks);
+    unsafe {
+        flash.erase_page(0x10020000).unwrap_or_else(|err| {
+            write_console(flash::map_err(err).as_bytes());
+        });
+    }
+    write_console(b"?\n");
+
+    flash.write_32(0x10020000,0xdeadbeef).unwrap_or_else(|err| {
+        write_console(flash::map_err(err).as_bytes());
+    });
+    let result = flash.read_32(0x10020000).unwrap_or_else(|err| {
+        write_console(flash::map_err(err).as_bytes());
+        0
+    });
+    write_console(format!("0x{:x}", result).as_bytes());
+
+    let mut subscriptions: [Subscription; 8] = load_subscriptions(&flash);
 
 
 
     // Fundamental event loop
     loop {
         //
-        console::write_console(console,b"!\n");
+        write_console(b"!\n");
         // Delays to avoid side channel attacks
         let test_val = trng.gen_u32();
 
         //
         let output = test(test_val, &trng, &mut delay);
         if test_val*test_val == output {
-            console::read_resp(&mut subscriptions, console);
+            console::read_resp(&flash, &mut subscriptions);
         }
     }
 }
@@ -125,7 +139,7 @@ fn test(scan: u32, trng: &Trng, delay: &mut Delay) -> u32 {
  * Reads all subscriptions from the flash
  * Acts as a wrapper to load_subscription
  */
-fn load_subscriptions(console: &console::cons) -> [Subscription; 8] {
+fn load_subscriptions(flash: &hal::flc::Flc) -> [Subscription; 8] {
 
         // Page 1: Modulus, Channel, Start, End, Forward Count, Backward Count
         // Page 2: Forward exponents, Backward exponents
@@ -134,7 +148,7 @@ fn load_subscriptions(console: &console::cons) -> [Subscription; 8] {
         //let layout = Layout::from_size_align((SUB_SIZE * 8) as usize, 8).unwrap();
         //let mut forward_backward: *mut u8 = alloc(layout);
         for i in 0usize..8 {
-            if !load_subscription(&mut ret[i], console, i) {
+            if !load_subscription(flash, &mut ret[i], i) {
                 break;
             }
         }
@@ -150,34 +164,33 @@ fn load_subscriptions(console: &console::cons) -> [Subscription; 8] {
  * @param subscription: A reference to a subscription being loaded
  * @return The success of the operation
  */
-fn load_subscription(subscription: &mut Subscription, console: &cons, channel_pos: usize) -> bool {
+fn load_subscription(flash: &hal::flc::Flc, subscription: &mut Subscription, channel_pos: usize) -> bool {
     let cache: RefCell<[u8; 2048 as usize]> = RefCell::new([0; 2048 as usize]);
     let mut pos: usize = (channel_pos * SUB_SIZE as usize);
-    console::write_console(console, format!("{:x}", (SUB_LOC as u32) + pos as u32).as_bytes());
-    let result = flash().check_address(SUB_LOC as u32 + pos as u32);
+    let result = flash.check_address(SUB_LOC as u32 + pos as u32);
     if result.is_err() {
         match result.unwrap_err() {
             FlashError::InvalidAddress => {
-                console::write_console(console, b"InvalidAddress\n");
+                console::write_console(b"InvalidAddress\n");
             }
             FlashError::AccessViolation => {
-                console::write_console(console, b"InvalidOperation\n");
+                console::write_console(b"InvalidOperation\n");
             }
             FlashError::NeedsErase => {
-                console::write_console(console, b"NeedsErase\n");
+                console::write_console(b"NeedsErase\n");
             }
         };
         return false
     }
     unsafe {
-        let _ = flash::read_bytes(SUB_LOC as u32 + pos as u32, &mut (*cache.as_ptr()), 2048 as usize);
+        let _ = flash::read_bytes(flash, SUB_LOC as u32 + pos as u32, &mut (*cache.as_ptr()), 2048 as usize);
 
-        let init = (*cache.as_ptr())[4]; // Should always be non-zero if it's loaded right
+        let init = (*cache.as_ptr())[5]; // Should always be non-zero if it's loaded right
         if init == 0 || init == 0xFF {
-            console::write_console(console, b"huh\n");
+            console::write_console(&[init]);
             return false;
         } else {
-            console::write_console(console, &[init]);
+            console::write_console(&[init]);
         }
 
         subscription.location = pos;
@@ -203,9 +216,9 @@ fn load_subscription(subscription: &mut Subscription, console: &cons, channel_po
             subscription.backward_pos[j] = val;
         }
         pos += 128;
-        console::write_console(console, format!("{:#x}", subscription.channel).as_bytes());
+        console::write_console(format!("{:#x}", subscription.channel).as_bytes());
 
-        console::write_console(console, b"hook");
+        console::write_console(b"hook");
         subscription.n=Odd::<Integer>::new(Integer::from_be_bytes((*cache.as_ptr())[pos ..pos + 128].try_into().unwrap())).unwrap();
         pos += 128;
 
@@ -247,6 +260,7 @@ fn get_channels() -> [u32; 9] {
         ret[i] = channel.parse::<u32>().unwrap();
         i += 1;
     }
+
 
     ret
 }

@@ -38,13 +38,13 @@ def mid_calc(b):
 
 def powmod_p(a, b, modulus):
     # print(gmpy2.bit_length(b))
-    
+
     if b > 2**40:
         (x,y,z) = mid_calc(b)
         return gmpy2.f_mod(rep_powmod_p(4, a, x, modulus)*rep_powmod_p(2, a, y, modulus)*powmod_p(a, z, modulus), modulus)
     else:
         return gmpy2.powmod(a, b, modulus)
-    
+
 @cachetools.cached(cachetools.MRUCache(maxsize=1024))
 def rep_powmod_p(reps: int, a, b, modulus):
     ret = a
@@ -56,7 +56,7 @@ def wind_encoder(root, target, modulus):
             result = root
             total = 0
             for section in range(15, -1, -1):
-                mask = (1 << (section * 4)) * 15 
+                mask = (1 << (section * 4)) * 15
                 times = (mask & target) >> (section * 4)
                 for i in range(times):
                     result = gmpy2.powmod(5, result, modulus)
