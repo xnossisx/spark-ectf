@@ -167,15 +167,9 @@ def main():
 
     encoder = Encoder(args.secrets.read())
     #encoder = Encoder(open("/home/bruberu/ps/MITREeCTF/spark-ectf/secrets/secrets.json", "rb").read())
-    repr(encoder.encode(args.channel, args.frame.encode(), args.timestamp + i))
+    repr(encoder.encode(args.channel, args.frame.encode(), args.timestamp))
     #frame = json.loads(open("/home/bruberu/ps/MITREeCTF/spark-ectf/frames/x_c0.json", "rb").read())[0][1].encode()
-    #start = time.time()
-    #for i in range(0, 1000000, 1000):
-    #    starti = time.time()
-    #    repr(encoder.encode(1, frame, i))
-    #    endi = time.time() - starti
-    #end = time.time() - start
-    #print("Time taken: ", end)
+    print("Time taken: ", end)
 
 
 if __name__ == "__main__":

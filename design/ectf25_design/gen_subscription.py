@@ -50,20 +50,21 @@ def next_required_intermediate(start):
 
 
 def get_intermediates(start, end, root, exponents, modulus):
-    previous = -1
     intermediates = {}
+    if start == 0:
+        intermediates[start] = root
+        return intermediates
+    previous = -1
     while True:
         # Since we're looking for the compressed representation,
         # We need to actually make sure to get the expanded representation of the previous intermediate
         if previous == -1:
             intermediates[start] = root
         else:
-            if start != 0:
-                intermediates[start] = top_bits(wind_encoder(root, previous, exponents, modulus), 128)
-            else:
-                intermediates[start] = wind_encoder(root, previous, exponents, modulus)
+            intermediates[start] = top_bits(wind_encoder(root, previous, exponents, modulus), 128)
         previous = start
         start = next_required_intermediate(start)
+        print(start)
         if start > end:
             break
     return intermediates
