@@ -15,6 +15,8 @@ use hal::pac::dvs::Mon;
 const FORWARD: u64 = 0x1f8c25d4b902e785;
 const BACKWARD: u64 = 0xf329d3e6bb90fcc5;
 
+const INTERMEDIATE_NUM: usize = 64;
+
 // First 64 primes after 1024
 const PRIMES: [u32; 64] = [1031,1033,1039,1049,1051,1061,1063,1069,1087,1091,1093,1097,1103,1109,1117,1123,1129,1151,1153,1163,1171,1181,1187,1193,1201,1213,1217,1223,1229,1231,1237,1249,1259,1277,1279,1283,1289,1291,1297,1301,1303,1307,1319,1321,1327,1361,1367,1373,1381,1399,1409,1423,1427,1429,1433,1439,1447,1451,1453,1459,1471,1481,1483,1487];
 
@@ -47,8 +49,8 @@ pub fn get_subscriptions(flash: &hal::flc::Flc) -> Vec<SubStat> {
 #[derive(Clone)]
 pub struct Subscription {
     pub(crate) n: Odd<Integer>,
-    pub(crate) forward_pos: [u64; 16],
-    pub(crate) backward_pos: [u64; 16],
+    pub(crate) forward_pos: [u64; INTERMEDIATE_NUM],
+    pub(crate) backward_pos: [u64; INTERMEDIATE_NUM],
     pub(crate) start: u64,
     pub(crate) end: u64,
     pub(crate) channel: u32,
@@ -59,8 +61,8 @@ impl Subscription {
     pub fn new() -> Subscription {
         Subscription {
             n: Odd::new(Integer::ONE).unwrap(),
-            forward_pos: [0; 32],
-            backward_pos: [0; 32],
+            forward_pos: [0; INTERMEDIATE_NUM],
+            backward_pos: [0; INTERMEDIATE_NUM],
             start: 0,
             end: 0,
             channel: 0,
@@ -71,7 +73,7 @@ impl Subscription {
     pub fn get_intermediate(&self, flash: &hal::flc::Flc, pos: usize, dir: u64) -> Integer {
         let ref_location = if dir == FORWARD {self.location + 768 + pos * 8} else {self.location + 2560 + pos * 128};
         let ref_location = ref_location as u32;
-        let intermediate_buffer: RefCell<[u8; 128]> = RefCell::new([0; 128]);
+        let intermediate_buffer: RefCell<[u8; INTERMEDIATE_NUM]> = RefCell::new([0; INTERMEDIATE_NUM]);
         unsafe {
             let _ = flash::read_bytes(flash, ref_location, &mut (*intermediate_buffer.as_ptr())[0..128], 128);
             Integer::from_be_bytes((*intermediate_buffer.as_ptr()).try_into().unwrap()).bitxor(get_hashed_id())
@@ -99,18 +101,18 @@ impl Subscription {
         // Takes the result to be the top exponent of a power tower of primes
 
         let mask_combo = target-closest_idx as u64;
-        let mut idx_nibble = 15;
+        let mut idx = INTERMEDIATE_NUM;
         loop {
-            let mask = (1 << (idx_nibble << 2)) * 15;
-            let distance = (mask & mask_combo) >> (idx_nibble << 2);
+            let mask = 1 << idx;
+            let distance = (mask & mask_combo) >> idx;
             for i in 0..distance {
-                let monty = MontyForm::new(&Integer::from(PRIMES[idx_nibble]), MontyParams::new(self.n)).pow(&result);
+                let monty = MontyForm::new(&Integer::from(PRIMES[idx]), MontyParams::new(self.n)).pow(&result);
                 result = monty.retrieve();
             }
-            if (idx_nibble == 0) {
+            if (idx == 0) {
                 break;
             }
-            idx_nibble -= 1;
+            idx -= 1;
         }
 
         result

@@ -72,7 +72,7 @@ def get_intermediates(start, end, root, exponents, modulus):
 def get_intermediates_hashed(start, end, root, exponents, modulus, device_hash: int):
     intermediates = get_intermediates(start, end, root, exponents, modulus)
     for i in intermediates:
-        intermediates[i] = (intermediates[i] ^ device_hash) % modulus
+        intermediates[i] = (intermediates[i] ^ device_hash)
     return intermediates
 
 def pack_intermediates(intermediates: dict):

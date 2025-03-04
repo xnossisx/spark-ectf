@@ -9,7 +9,7 @@ use core::alloc::GlobalAlloc;
 use core::cell::RefCell;
 use core::panic::PanicInfo;
 use cortex_m::delay::Delay;
-use crypto_bigint::{Encoding, Odd, Zero, U1024};
+use crypto_bigint::{Encoding, Odd, Zero, U1024, U512};
 use embedded_alloc::LlffHeap;
 use hmac_sha512;
 
@@ -238,19 +238,19 @@ fn get_id() -> u32 {
 }
 
 ///Outputs the SHA-3 hash of the device ID
-static mut HASH: Integer = Integer::ZERO;
-fn get_hashed_id() -> &'static Integer {
+static mut HASH: u128 = 0;
+pub fn get_hashed_id() -> &'static u128 {
     unsafe {
         if HASH.is_zero().into() {
-            let mut output: [u8;128]=[0; 128];
+            let mut output: [u8;64]=[0; 64];
             output.copy_from_slice(&hmac_sha512::Hash::hash(get_id().to_be_bytes().as_ref()));
-            HASH = Integer::from_be_bytes(output);
+            HASH=u128::from_be_bytes(output);
         }
         &HASH
     }
 }
 
-fn get_channels() -> [u32; 9] {
+pub fn get_channels() -> [u32; 9] {
     let mut ret: [u32; 9] = [0; 9];
     ret[0] = 0;
     // Get the channels from the environment variable CHANNELS, which is like "1,3,7,8" or something
