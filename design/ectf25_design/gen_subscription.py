@@ -22,49 +22,66 @@ def get_primes_starting_with(start, amount):
             primes.append(i)
     return primes
 
+def top_bits(n, bits):
+    print(n)
+    return n >> (gmpy2.bit_length(n) - bits + 1) & ((1 << bits) - 1)
+
+
 def wind_encoder(root, target, exponents, modulus):
     result = root
-    for section in range(15, -1, -1):
-        mask = (1 << (section * 4)) * 15 
-        times = (mask & target) >> (section * 4)
+    for section in range(64, -1, -1):
+        mask = 1 << section
+        times = (mask & target) >> section 
         for i in range(times):
-            result = gmpy2.powmod(exponents[section], result, modulus)
+            if gmpy2.bit_length(result) > 128:
+                result = gmpy2.powmod(exponents[section], top_bits(result, 128), modulus)
+            else:
+                result = gmpy2.powmod(exponents[section], result, modulus)
     return result
 
 def next_required_intermediate(start):
     complement = 0
-    for section in range(15, -1, -1):
+    for section in range(64, -1, -1):
         # Round up the range
-        bit = (1 << (section * 4))
-        mask = bit * 15 
-        common = mask & start
-        if common != 0:
-            complement = mask - common + bit
+        bit = 1 << section
+        if bit & start != 0:
+            complement = bit
     return start + complement
 
 
 def get_intermediates(start, end, root, exponents, modulus):
+    previous = -1
     intermediates = {}
     while True:
-        intermediates[start] = wind_encoder(root, start, exponents, modulus)
+        # Since we're looking for the compressed representation,
+        # We need to actually make sure to get the expanded representation of the previous intermediate
+        if previous == -1:
+            intermediates[start] = root
+        else:
+            if start != 0:
+                intermediates[start] = top_bits(wind_encoder(root, previous, exponents, modulus), 128)
+            else:
+                intermediates[start] = wind_encoder(root, previous, exponents, modulus)
+        previous = start
         start = next_required_intermediate(start)
         if start > end:
             break
     return intermediates
 
-def get_intermediates_hashed(start, end, root, exponents, modulus, device_hash: bytes):
+def get_intermediates_hashed(start, end, root, exponents, modulus, device_hash: int):
     intermediates = get_intermediates(start, end, root, exponents, modulus)
     for i in intermediates:
-        intermediates[i] = (intermediates[i] ^ int.from_bytes(device_hash, byteorder='big')) % modulus
+        intermediates[i] = (intermediates[i] ^ device_hash) % modulus
     return intermediates
 
 def pack_intermediates(intermediates: dict):
     res = b""
     positions = sorted(intermediates.keys())
     for position in positions:
-        res += intermediates[position].to_bytes(128, byteorder="big")
-    # Pack the remainder of the 8192 bytes
-    for _ in range(2048 - len(positions) * 128):
+        print(intermediates[position])
+        res += intermediates[position].to_bytes(16, byteorder="big")
+    # Pack the remainder of the 1024 bytes
+    for _ in range((64 * 16) - len(positions) * 16):
         res += b"\x00"
     return res
 
@@ -73,8 +90,8 @@ def pack_inter_positions(intermediates: dict):
     positions = sorted(intermediates.keys())
     for position in positions:
         res += position.to_bytes(8, byteorder="big")
-    # Pack the remainder of the 128 bytes
-    for _ in range(128 - len(positions) * 8):
+    # Pack the remainder of the 512 bytes
+    for _ in range(512 - len(positions) * 8):
         res += b"\x00"
     return res
 
@@ -86,7 +103,7 @@ def pack_metadata(channel: int, modulus: int, start: int, end: int, forward_inte
         start.to_bytes(8, byteorder='big') + end.to_bytes(8, byteorder='big')
     
     print(len(res))
-    for _ in range(512 - len(res)):
+    for _ in range(1280 - len(res)):
         res += b"\x00"
     return res
 
@@ -106,14 +123,14 @@ def gen_subscription(
     secrets = json.loads(secrets)
 
     modulus = secrets[str(channel)]["modulus"]
-    exponents = get_primes_starting_with(1025, 16)
+    exponents = get_primes_starting_with(1025, 64)
 
     forward = secrets[str(channel)]["forward"]
     backward = secrets[str(channel)]["backward"]
 
     end_of_time = 2**64 - 1
     forward_inters = get_intermediates(start, end, forward, exponents, modulus)
-    backward_inters = get_intermediates_hashed(end_of_time - end, end_of_time - start, backward, exponents, modulus, hashlib.sha3_512(device_id.to_bytes(4)).digest())
+    backward_inters = get_intermediates_hashed(end_of_time - end, end_of_time - start, backward, exponents, modulus, int.from_bytes(hashlib.sha3_512(device_id.to_bytes(4)).digest()) & 0xffffffffffffffff)
     # Finally, we pack this like follows:
     
     # Pack the subscription. This will be sent to the decoder with ectf25.tv.subscribe
