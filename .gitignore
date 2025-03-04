@@ -23,3 +23,4 @@ design/ectf25_design/__pycache__/*
 /target
 /proofofconcept/env/
 /proofofconcept/env/lib/python3.12/site-packages/pip/_internal/commands/__pycache__
+/design/ectf25_design/__pycache__
