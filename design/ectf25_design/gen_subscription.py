@@ -86,6 +86,7 @@ def pack_intermediates(intermediates: dict):
         res += b"\x00"
     return res
 
+# Produces a 512-byte string indicating the position of each intermediate
 def pack_inter_positions(intermediates: dict):
     res = b""
     positions = sorted(intermediates.keys())
@@ -96,6 +97,7 @@ def pack_inter_positions(intermediates: dict):
         res += b"\x00"
     return res
 
+# Len: 1280
 def pack_metadata(channel: int, modulus: int, start: int, end: int, forward_inters: dict, backward_inters: dict):
     res = channel.to_bytes(4, byteorder='big') + \
     	len(forward_inters).to_bytes(1, byteorder='big') + len(backward_inters).to_bytes(1, byteorder='big') + \
