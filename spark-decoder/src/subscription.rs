@@ -16,7 +16,8 @@ const FORWARD: u64 = 0x1f8c25d4b902e785;
 const BACKWARD: u64 = 0xf329d3e6bb90fcc5;
 
 const INTERMEDIATE_NUM: usize = 64;
-const INTERMEDIATE_SIZE: usize = 16;
+const INTERMEDIATE_LOC: u32 = 1280;
+const INTERMEDIATE_SIZE: u32 = 16;
 
 // First 64 primes after 1024
 const PRIMES: [u32; 64] = [1031,1033,1039,1049,1051,1061,1063,1069,1087,1091,1093,1097,1103,1109,1117,1123,1129,1151,1153,1163,1171,1181,1187,1193,1201,1213,1217,1223,1229,1231,1237,1249,1259,1277,1279,1283,1289,1291,1297,1301,1303,1307,1319,1321,1327,1361,1367,1373,1381,1399,1409,1423,1427,1429,1433,1439,1447,1451,1453,1459,1471,1481,1483,1487];
@@ -72,12 +73,15 @@ impl Subscription {
     }
 
     pub fn get_intermediate(&self, flash: &hal::flc::Flc, pos: usize, dir: u64) -> Integer {
-        let ref_location = if dir == FORWARD {self.location + 1280 + pos * INTERMEDIATE_SIZE} else {self.location + 1280 + 1024 + pos * INTERMEDIATE_SIZE};
+        let ref_location = if dir == FORWARD
+            {self.location + (INTERMEDIATE_LOC as usize) + pos * INTERMEDIATE_SIZE as usize}
+        else
+            {self.location + INTERMEDIATE_LOC + 1024 + pos * INTERMEDIATE_SIZE as usize};
         let ref_location = ref_location as u32;
         let intermediate_buffer: RefCell<[u8; INTERMEDIATE_NUM]> = RefCell::new([0; INTERMEDIATE_NUM]);
         unsafe {
-            let _ = flash::read_bytes(flash, ref_location, &mut (*intermediate_buffer.as_ptr())[0..16], 16);
-            Integer::from_be_bytes((*intermediate_buffer.as_ptr()).try_into().unwrap()).bitxor(&Integer::from(&get_hashed_id()))
+            let _ = flash::read_bytes(flash, ref_location, &mut (*intermediate_buffer.as_ptr())[0..INTERMEDIATE_SIZE], INTERMEDIATE_SIZE as usize);
+            Integer::from_be_bytes((*intermediate_buffer.as_ptr()).try_into().unwrap()).bitxor(&Integer::from(get_hashed_id()))
         }
     }
 
