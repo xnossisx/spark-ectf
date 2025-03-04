@@ -199,23 +199,23 @@ fn load_subscription(flash: &hal::flc::Flc, subscription: &mut Subscription, cha
 
         pos += 2;
 
-        for j in 0..16 {
+        for j in 0..64 {
             let val = u64::from_be_bytes((*cache.as_ptr())[pos + j*8 ..pos + j*8 + 8].try_into().unwrap());
             if (val == 0 && j > 0) {
                 break;
             }
             subscription.forward_pos[j] = val;
         }
-        pos += 128;
+        pos += 512;
 
-        for j in 0..16 {
+        for j in 0..64 {
             let val = u64::from_be_bytes((*cache.as_ptr())[pos + j*8 ..pos + j*8 + 8].try_into().unwrap());
             if (val == 0 && j > 0) {
                 break;
             }
             subscription.backward_pos[j] = val;
         }
-        pos += 128;
+        pos += 512;
         console::write_console(format!("{:#x}", subscription.channel).as_bytes());
 
         console::write_console(b"hook");
