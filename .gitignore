@@ -21,3 +21,5 @@ design/ectf25_design/__pycache__/*
 # Added by cargo
 
 /target
+/proofofconcept/env/
+/proofofconcept/env/lib/python3.12/site-packages/pip/_internal/commands/__pycache__

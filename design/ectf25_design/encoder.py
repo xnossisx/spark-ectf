@@ -32,23 +32,6 @@ def extended_gcd(a, b):
         x = y1
         y = x1 - (a // b) * y1
         return g, x, y
-    
-def modular_inverse(a, m):
-    """
-    Calculates the modular inverse of a modulo m using the Extended Euclidean Algorithm.
-
-    Args:
-      a: The integer for which to find the inverse.
-      m: The modulus.
-
-    Returns:
-      The modular inverse of a modulo m, or None if it doesn't exist.
-    """
-    g, x, y = extended_gcd(a, m)
-    if g != 1:
-        return None  # Inverse doesn't exist if a and m are not coprime
-    else:
-        return x % m
 
 def fletcher32(bytes):
     a = list(bytes)

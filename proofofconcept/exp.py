@@ -1,3 +1,4 @@
+import inspect
 from gmpy2 import *
 import rsa
 import time
@@ -7,6 +8,11 @@ from gmpy2 import gmpy2
 from gmpy2.gmpy2 import mpz
 import json
 
+@functools.cache
+def mid_calc_2(b):
+    x = gmpy2.isqrt(b)
+    y = b-gmpy2.square(x)
+    return (x,y)
 
 def powmod(a, b, modulus, prime_1, prime_2):
     b_red_1 = gmpy2.f_mod(b, prime_1 - 1)
@@ -44,6 +50,12 @@ def wind_encoder(root, target, exponents, modulus):
             result = powmod_plus(exponents[section], result, modulus)
     return result
 
+#time_s = time.time()
+#print(gmpy2.powmod(a, b.e, modulus))
+#for i in range(0, 240000):
+#    result = gmpy2.powmod(a-i, b.e, modulus)
+#te = time.time() - time_s
+#print(te)
 
 def wind_encoder_gmp(root, target, exponents, modulus):
     result = root
