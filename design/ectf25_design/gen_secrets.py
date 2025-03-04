@@ -41,9 +41,10 @@ def gen_secrets(channels: list[int]) -> bytes:
         secrets[channel]["modulus"] = modulus
         secrets[channel]["p"] = private.p
         secrets[channel]["q"] = private.q
+        secrets[channel]["d"] = private.d
 
-        secrets[channel]["forward"] = rsa.randnum.read_random_int(1024)
-        secrets[channel]["backward"] = rsa.randnum.read_random_int(1024)
+        secrets[channel]["forward"] = rsa.randnum.read_random_int(128)
+        secrets[channel]["backward"] = rsa.randnum.read_random_int(128)
 
 
     # NOTE: if you choose to use JSON for your file type, you will not be able to

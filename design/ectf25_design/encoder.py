@@ -38,9 +38,47 @@ def fletcher32(bytes):
     b = [sum(a[:i])%65535 for i in range(len(a)+1)]
     return (sum(b) << 16) | max(b)
 
+def powmod(a, b, modulus, prime_1, prime_2):
+    b_red_1 = gmpy2.f_mod(b, prime_1 - 1)
+    b_red_2 = gmpy2.f_mod(b, prime_2 - 1)
+    q_inv = gmpy2.invert(prime_2, prime_1)
+    m_1 = gmpy2.powmod(a, b_red_1, prime_1)
+    m_2 = gmpy2.powmod(a, b_red_2, prime_2)
+    sub = gmpy2.f_mod(q_inv*(m_1-m_2), prime_1)
 
+    return gmpy2.f_mod(m_2 + (sub * prime_2), modulus)
+
+# Gets bits 2 - (bit + 1)
+def top_bits(n, bits):
+    return n >> (gmpy2.bit_length(n) - bits + 1) & ((1 << bits) - 1)
+
+
+def wind_encoder(root, target, exponents, modulus, p, q):
+    result = root
+    for section in range(64, -1, -1):
+        mask = 1 << section
+        times = (mask & target) >> section
+        for i in range(times):
+            if gmpy2.bit_length(result) > 128:
+                result = powmod(exponents[section], top_bits(result, 128), modulus, p, q)
+            else:
+                result = powmod(exponents[section], result, modulus, p, q)
+    return result
+
+def get_primes_starting_with(start, amount): 
+    primes = []
+    i = start
+    while len(primes) < amount:
+        i += 2
+        if isprime(i):
+            primes.append(i)
+    return primes
 class Encoder:
-
+    channel_cache = -1
+    cache_mask = 0xfffffffffff00000 # This encoder caches 10 out of the 16 nibbles in a timestamp
+    cached_timestamp = -1
+    cached_forward = -1
+    cached_backward = -1
     def __init__(self, secrets: bytes):
         """
         You **may not** change the arguments or returns of this function!
@@ -50,15 +88,6 @@ class Encoder:
         """
         # TODO: parse your secrets data here and run any necessary pre-processing to
         #   improve the throughput of Encoder.encode
-
-        def get_primes_starting_with(start, amount): 
-            primes = []
-            i = start
-            while len(primes) < amount:
-                i += 2
-                if isprime(i):
-                    primes.append(i)
-            return primes
         self.exponents = get_primes_starting_with(1025, 64)
 
         # Load the json of the secrets file
@@ -88,36 +117,35 @@ class Encoder:
         """
         # TODO: encode the satellite frames so that they meet functional and
         #  security requirements
-        def wind_encoder(root, target, exponents, modulus):
-            result = root
-            total = 0
-            for section in range(15, -1, -1):
-                mask = (1 << (section * 4)) * 15 
-                times = (mask & target) >> (section * 4)
-                for i in range(times):
-                    result = gmpy2.powmod(exponents[section], result, modulus)
-                total += times
-            print(total)
-            return result
+
         
-        forward_root = self.secrets[str(channel)]["forward"]
-        backward_root = self.secrets[str(channel)]["backward"]
         modulus = self.secrets[str(channel)]["modulus"]
         totient = (self.secrets[str(channel)]["p"] - 1) * (self.secrets[str(channel)]["q"] - 1)
         end_of_time = 2**64 - 1
-        start = time.time()
-        forward = wind_encoder(forward_root, timestamp, self.exponents, modulus)
-        backward = wind_encoder(backward_root, end_of_time - timestamp, self.exponents, modulus)
-        end = time.time() - start
-        print("Time taken: ", end)
+        p = self.secrets[str(channel)]["p"]
+        q = self.secrets[str(channel)]["q"]
 
+        if self.channel_cache != channel or timestamp & self.cache_mask != self.cached_timestamp:
+            # Break the timestamp into two parts
+            self.cached_timestamp = timestamp & self.cache_mask
+            self.channel_cache = channel
+            self.cached_timestamp = timestamp
+            forward_root = self.secrets[str(channel)]["forward"]
+            backward_root = self.secrets[str(channel)]["backward"]
+
+
+            self.cached_forward = wind_encoder(forward_root, self.cached_timestamp, self.exponents, modulus, p, q)
+            self.cached_backward = wind_encoder(backward_root, (end_of_time - self.cached_timestamp) & self.cache_mask, self.exponents, modulus, p, q)
+
+        extra = timestamp & ~self.cache_mask
+
+        forward = wind_encoder(self.cached_forward, extra, self.exponents, modulus, p, q)
+        backward = wind_encoder(self.cached_backward, (end_of_time & ~self.cache_mask) - extra, self.exponents, modulus, p, q)
         guard = forward ^ backward
-        guard_inverse = gmpy2.invert(65537, totient)
+
+        encoded = powmod(int.from_bytes(frame) ^ guard, self.secrets[str(channel)]["d"], modulus, p, q).to_bytes(128, byteorder="big")
         
-        encoded = pow(int.from_bytes(frame) ^ guard, guard_inverse, modulus).to_bytes(128, byteorder="big")
-        
-        checksum = fletcher32(frame).to_bytes(4, byteorder="big")
-        return struct.pack("<IQ", channel, timestamp) + encoded + checksum
+        return struct.pack("<IQ", channel, timestamp) + encoded
 
 
 def main():
@@ -138,8 +166,10 @@ def main():
     args = parser.parse_args()
 
     encoder = Encoder(args.secrets.read())
-    
-    print(repr(encoder.encode(args.channel, args.frame.encode(), args.timestamp)))
+    #encoder = Encoder(open("/home/bruberu/ps/MITREeCTF/spark-ectf/secrets/secrets.json", "rb").read())
+    repr(encoder.encode(args.channel, args.frame.encode(), args.timestamp))
+    #frame = json.loads(open("/home/bruberu/ps/MITREeCTF/spark-ectf/frames/x_c0.json", "rb").read())[0][1].encode()
+    print("Time taken: ", end)
 
 
 if __name__ == "__main__":

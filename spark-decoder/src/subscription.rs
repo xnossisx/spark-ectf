@@ -59,8 +59,8 @@ impl Subscription {
     pub fn new() -> Subscription {
         Subscription {
             n: Odd::new(Integer::ONE).unwrap(),
-            forward_pos: [0; 16],
-            backward_pos: [0; 16],
+            forward_pos: [0; 32],
+            backward_pos: [0; 32],
             start: 0,
             end: 0,
             channel: 0,
@@ -69,7 +69,7 @@ impl Subscription {
     }
 
     pub fn get_intermediate(&self, flash: &hal::flc::Flc, pos: usize, dir: u64) -> Integer {
-        let ref_location = if dir == FORWARD {self.location + 512 + pos * 128} else {self.location + 2560 + pos * 128};
+        let ref_location = if dir == FORWARD {self.location + 768 + pos * 8} else {self.location + 2560 + pos * 128};
         let ref_location = ref_location as u32;
         let intermediate_buffer: RefCell<[u8; 128]> = RefCell::new([0; 128]);
         unsafe {
