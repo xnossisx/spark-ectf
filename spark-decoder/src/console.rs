@@ -1,4 +1,4 @@
-use crate::{get_channels, get_loc_for_channel};
+use crate::{get_channels, get_loc_for_channel, SUB_SPACE};
 use crate::pac::{Flc, Uart0};
 use crate::subscription::{get_subscriptions, Subscription};
 use crate::{flash, load_subscription, SUB_LOC, SUB_SIZE};
@@ -159,7 +159,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Subscription; 8]) {
                 //ret[0..4] = bytemuck::try_cast(&(subscriptions.len() as u32)).unwrap();
                 // Casts parts of the subscription data to the listing
                 for i in 0..subscriptions.len() {
-                    ret[i*20usize+4..i*20usize+8].copy_from_slice(bytemuck::bytes_of(&(i as i32)));
+                    ret[i*20usize+4..i*20usize+8].copy_from_slice(bytemuck::bytes_of(&(subscriptions[i].channel)));
                     ret[i*20usize+8..i*20usize+16].copy_from_slice(bytemuck::bytes_of(&(subscriptions[i].start)));
                     ret[i*20usize+16..i*20usize+24].copy_from_slice(bytemuck::bytes_of(&(subscriptions[i].end)));
                 }
@@ -191,7 +191,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Subscription; 8]) {
                         channel = get_loc_for_channel(((byte_list[0] as u32) << 24) +
                             ((byte_list[1] as u32) << 16) +
                             ((byte_list[2] as u32) << 8) + (byte_list[3] as u32));
-                        pos = SUB_LOC as u32 + (channel * SUB_SIZE);
+                        pos = SUB_LOC as u32 + (channel * SUB_SPACE);
                         unsafe {
                             flash.erase_page(pos).unwrap_or_else(|test| {
                                 write_err(flash::map_err(test).as_bytes());

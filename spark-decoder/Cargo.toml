@@ -24,6 +24,7 @@ embedded-alloc = { version = "0.6.0", default-features = false, features = ["llf
 bytemuck = { version = "1.21.0", default-features=false }
 hmac-sha512 = "1.1.6"
 embedded-io = "0.6.1"
+blake3 = { version = "1.6.1", default-features = false }
 #getrandom = { version = "0.2.15", features = ["custom"] }
 
 #rug = {version = "1.27.0", features = ["integer"], default-features = false }

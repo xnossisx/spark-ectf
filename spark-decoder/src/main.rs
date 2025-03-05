@@ -26,7 +26,14 @@ mod subscription;
 
 extern crate alloc;
 pub extern crate max7800x_hal as hal;
-const SUB_SIZE: u32 = 8192; /*two keys + key lengths + modulus + channel + start + end*/
+const SUB_SPACE: u32 = 8192; /* page length */
+const SUB_SIZE: usize = 4+2+64+64+128+8+8+1024+1024;
+/* channel # + intermediate lengths + intermediate references + modulus + start + end +
+intermediates (1024*2)*/
+
+pub const INTERMEDIATE_NUM: u32 = 64;
+pub const INTERMEDIATE_LOC: u32 = 1280;
+pub const INTERMEDIATE_SIZE: u32 = 16;
 pub use hal::entry;
 use hal::flc::FlashError;
 pub use hal::pac;
@@ -183,21 +190,32 @@ fn load_subscription(flash: &hal::flc::Flc, subscription: &mut Subscription, cha
         return false
     }
     unsafe {
-        let _ = flash::read_bytes(flash, SUB_LOC as u32 + pos as u32, &mut (*cache.as_ptr()), 2048 as usize);
+        let _ = flash::read_bytes(flash, SUB_LOC as u32 + pos as u32, &mut (*cache.as_ptr()), SUB_SIZE);
 
         let init = (*cache.as_ptr())[5]; // Should always be non-zero if it's loaded right
         if init == 0 || init == 0xFF {
-            console::write_console(&[init]);
+            write_console(&[init]);
             return false;
         } else {
-            console::write_console(&[init]);
+            write_console(&[init]);
         }
 
         subscription.location = pos;
         subscription.channel=u32::from_be_bytes((*cache.as_ptr())[pos..pos+4].try_into().unwrap());
         pos += 4;
 
+        let _ = u8::from_be_bytes(*cache.as_ptr())[pos..pos+1].try_into().unwrap();
+        let _ = u8::from_be_bytes(*cache.as_ptr())[pos+1..pos+2].try_into().unwrap();
         pos += 2;
+
+        write_console(b"hook");
+        subscription.n=Odd::<Integer>::new(Integer::from_be_bytes((*cache.as_ptr())[pos ..pos + 128].try_into().unwrap())).unwrap();
+        pos += 128;
+
+        subscription.start=u64::from_be_bytes((*cache.as_ptr())[pos..pos+8].try_into().unwrap());
+        pos += 8;
+        subscription.end=u64::from_be_bytes((*cache.as_ptr())[pos..pos+8].try_into().unwrap());
+        pos += 8;
 
         for j in 0..64 {
             let val = u64::from_be_bytes((*cache.as_ptr())[pos + j*8 ..pos + j*8 + 8].try_into().unwrap());
@@ -206,7 +224,7 @@ fn load_subscription(flash: &hal::flc::Flc, subscription: &mut Subscription, cha
             }
             subscription.forward_pos[j] = val;
         }
-        pos += 512;
+        pos += (INTERMEDIATE_SIZE*INTERMEDIATE_NUM) as usize;
 
         for j in 0..64 {
             let val = u64::from_be_bytes((*cache.as_ptr())[pos + j*8 ..pos + j*8 + 8].try_into().unwrap());
@@ -215,16 +233,10 @@ fn load_subscription(flash: &hal::flc::Flc, subscription: &mut Subscription, cha
             }
             subscription.backward_pos[j] = val;
         }
-        pos += 512;
-        console::write_console(format!("{:#x}", subscription.channel).as_bytes());
+        pos += (INTERMEDIATE_SIZE*INTERMEDIATE_NUM) as usize;
+        write_console(format!("{:#x}", subscription.channel).as_bytes());
 
-        console::write_console(b"hook");
-        subscription.n=Odd::<Integer>::new(Integer::from_be_bytes((*cache.as_ptr())[pos ..pos + 128].try_into().unwrap())).unwrap();
-        pos += 128;
 
-        subscription.start=u64::from_be_bytes((*cache.as_ptr())[pos..pos+8].try_into().unwrap());
-        pos += 8;
-        subscription.end=u64::from_be_bytes((*cache.as_ptr())[pos..pos+8].try_into().unwrap());
     }
 
     true
