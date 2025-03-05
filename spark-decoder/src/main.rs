@@ -31,9 +31,9 @@ const SUB_SIZE: usize = 4+2+64+64+128+8+8+1024+1024;
 /* channel # + intermediate lengths + intermediate references + modulus + start + end +
 intermediates (1024*2)*/
 
-pub const INTERMEDIATE_NUM: u32 = 64;
+pub const INTERMEDIATE_NUM: usize = 64;
 pub const INTERMEDIATE_LOC: u32 = 1280;
-pub const INTERMEDIATE_SIZE: u32 = 16;
+pub const INTERMEDIATE_SIZE: usize = 16;
 pub use hal::entry;
 use hal::flc::FlashError;
 pub use hal::pac;
@@ -204,8 +204,8 @@ fn load_subscription(flash: &hal::flc::Flc, subscription: &mut Subscription, cha
         subscription.channel=u32::from_be_bytes((*cache.as_ptr())[pos..pos+4].try_into().unwrap());
         pos += 4;
 
-        let _ = u8::from_be_bytes(*cache.as_ptr())[pos..pos+1].try_into().unwrap();
-        let _ = u8::from_be_bytes(*cache.as_ptr())[pos+1..pos+2].try_into().unwrap();
+        let _ = u8::from_be_bytes((*cache.as_ptr())[pos..pos+1].try_into().unwrap());
+        let _ = u8::from_be_bytes((*cache.as_ptr())[pos+1..pos+2].try_into().unwrap());
         pos += 2;
 
         write_console(b"hook");
@@ -247,19 +247,6 @@ fn load_subscription(flash: &hal::flc::Flc, subscription: &mut Subscription, cha
  */
 fn get_id() -> u32 {
     env!("DECODER_ID").parse::<u32>().unwrap()
-}
-
-///Outputs the SHA-3 hash of the device ID
-static mut HASH: u128 = 0;
-pub fn get_hashed_id() -> &'static u128 {
-    unsafe {
-        if HASH.is_zero().into() {
-            let mut output: [u8;64]=[0; 64];
-            output.copy_from_slice(&hmac_sha512::Hash::hash(get_id().to_be_bytes().as_ref()));
-            HASH=u128::from_be_bytes(output);
-        }
-        &HASH
-    }
 }
 
 pub fn get_channels() -> [u32; 9] {

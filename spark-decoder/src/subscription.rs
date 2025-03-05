@@ -1,17 +1,12 @@
+use crate::{flash, Integer, INTERMEDIATE_LOC, INTERMEDIATE_NUM, INTERMEDIATE_SIZE, SUB_LOC, SUB_SIZE};
 use alloc::vec::Vec;
-use core::cell::RefCell;
-use crate::{flash, get_hashed_id, Integer, INTERMEDIATE_LOC, INTERMEDIATE_NUM, INTERMEDIATE_SIZE, SUB_LOC, SUB_SIZE, SUB_SPACE};
-use core::ffi::c_void;
-use core::hash::Hash;
-use core::mem::zeroed;
-use core::ops::{BitXorAssign, Not};
-use core::ptr::{null, null_mut};
 use blake3::Hasher;
-use crypto_bigint::{Encoding, Int, Odd, U1024, U128, U512, U8192};
-use crypto_bigint::modular::{montgomery_reduction, MontyForm, MontyParams};
+use core::cell::RefCell;
+use core::hash::Hash;
+use crypto_bigint::modular::{MontyForm, MontyParams};
+use crypto_bigint::{Encoding, Odd, U128, U512};
 use hal;
-use hal::flc::{Flc, FLASH_PAGE_SIZE};
-use hal::pac::dvs::Mon;
+use hal::flc::Flc;
 
 /// Indicate test keys to protect against tampering
 const FORWARD: u64 = 0x1f8c25d4b902e785;
@@ -75,16 +70,16 @@ impl Subscription {
         }
     }
 
-    pub fn get_intermediate(&self, flash: &hal::flc::Flc, pos: usize, dir: u64) -> Integer {
+    pub fn get_intermediate(&self, flash: &hal::flc::Flc, pos: usize, dir: u64) -> U128 {
         let ref_location = if dir == FORWARD
             {self.location + (INTERMEDIATE_LOC as usize) + pos * INTERMEDIATE_SIZE as usize}
         else
             {self.location + (INTERMEDIATE_LOC as usize) + 1024 + pos * INTERMEDIATE_SIZE as usize};
         let ref_location = ref_location as u32;
-        let intermediate_buffer: RefCell<[u8; INTERMEDIATE_NUM as usize]> = RefCell::new([0; INTERMEDIATE_NUM]);
+        let intermediate_buffer: RefCell<[u8; INTERMEDIATE_SIZE as usize]> = RefCell::new([0; INTERMEDIATE_SIZE]);
         unsafe {
             let _ = flash::read_bytes(flash, ref_location, &mut (*intermediate_buffer.as_ptr())[0..INTERMEDIATE_SIZE], INTERMEDIATE_SIZE as usize);
-            Integer::from_be_bytes((*intermediate_buffer.as_ptr()).try_into().unwrap()).bitxor(&Integer::from(get_hashed_id()))
+            U128::from_be_bytes((*intermediate_buffer.as_ptr()).try_into().unwrap())
         }
     }
 
@@ -105,14 +100,16 @@ impl Subscription {
             }
         }
 
-        let mut result: Integer = self.get_intermediate(&flash, closest_idx, dir);
+        let intermediate: U128 = self.get_intermediate(&flash, closest_idx, dir);
+        let monty = MontyForm::new(&Integer::from(PRIMES[Self::get_lowest_bit(closest_pos)]), MontyParams::new(self.n)).pow(&U128::from(intermediate));
+        let mut result: Integer = monty.retrieve();
         // Takes the result to be the top exponent of a power tower of primes
 
         let mut idx = INTERMEDIATE_NUM;
         loop {
             let mask = 1 << idx;
             if mask & target != 0 {
-                let monty = MontyForm::new(&Integer::from(PRIMES[idx]), MontyParams::new(self.n)).pow(&U128::from(Self::compress(result, idx)));
+                let monty = MontyForm::new(&Integer::from(PRIMES[idx]), MontyParams::new(self.n)).pow(&U128::from(Self::compress(result, idx as u32)));
                 result = monty.retrieve();
             }
             if (idx == 0) {
@@ -132,6 +129,10 @@ impl Subscription {
         compressed
     }
 
+    // Gets the lowest bit that is on: e.g. returns "2" from "0100".
+    pub fn get_lowest_bit(n: u64) -> u64 {
+        (n & -n).ilog2()
+    }
     pub fn decode(&self, flash: &hal::flc::Flc, target: Integer, timestamp: u64) -> U512 {
         let forward = self.decode_side(flash, FORWARD, timestamp);
         let backward = self.decode_side(flash, !timestamp, BACKWARD); // Technically passing in 2^64 - timestamp
