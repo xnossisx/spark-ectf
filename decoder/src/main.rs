@@ -98,24 +98,8 @@ fn main() -> ! {
 
     // Load subscription from flash memory
     let flash = flash::init(p.flc, clks);
-    unsafe {
-        flash.erase_page(0x10020000).unwrap_or_else(|err| {
-            write_console(flash::map_err(err).as_bytes());
-        });
-    }
-    write_console(b"?\n");
-
-    flash.write_32(0x10020000,0xdeadbeef).unwrap_or_else(|err| {
-        write_console(flash::map_err(err).as_bytes());
-    });
-    let result = flash.read_32(0x10020000).unwrap_or_else(|err| {
-        write_console(flash::map_err(err).as_bytes());
-        0
-    });
-    write_console(format!("0x{:x}", result).as_bytes());
-
     let mut subscriptions: [Subscription; 8] = load_subscriptions(&flash);
-
+    
 
 
     // Fundamental event loop
