@@ -5,12 +5,14 @@ Date: 2025
 
 import argparse
 import json
+import os
 from pathlib import Path
 import hashlib
 from sympy import isprime
 import gmpy2
 
 from loguru import logger
+from blake3 import blake3
 
 
 def get_primes_starting_with(start, amount): 
@@ -22,29 +24,41 @@ def get_primes_starting_with(start, amount):
             primes.append(i)
     return primes
 
-def top_bits(n, bits):
-    print(n)
-    return n >> (gmpy2.bit_length(n) - bits + 1) & ((1 << bits) - 1)
+def compress(n, section):
+    print("{} {}".format(n, section))
+    compressed = int.from_bytes(blake3(section.to_bytes(1, byteorder="big")).update(n.to_bytes(128, byteorder="big")).digest()) & (2 ** 128 - 1)
+    return compressed
 
+# Gets the position of the last bit that is on in the number.
+def get_last_on_bit(num):
+    for i in range(0, 64):
+        if num & (1 << i) > 0:
+            return i
+    return 0
 
-def wind_encoder(root, target, exponents, modulus):
-    result = root
+def wind_encoder_compressed(root, target, exponents, modulus):
+    stop = get_last_on_bit(target) # For our case, we need to stop the bit rendering right before we expand the key.
+    expanded = gmpy2.powmod(exponents[0], root, modulus) # Since we're in the encoder, we use the base-case exponent.
+    compressed = root
+    print("hi {} {}".format(target, stop))
     for section in range(64, -1, -1):
         mask = 1 << section
-        times = (mask & target) >> section 
-        for i in range(times):
-            if gmpy2.bit_length(result) > 128:
-                result = gmpy2.powmod(exponents[section], top_bits(result, 128), modulus)
-            else:
-                result = gmpy2.powmod(exponents[section], result, modulus)
-    return result
+        print(section, mask & target)
+        if mask & target > 0:
+            if gmpy2.bit_length(expanded) > 128:
+                compressed = compress(expanded, section)
+        if section == stop:
+            return compressed
+        if mask & target > 0:
+            expanded = gmpy2.powmod(exponents[section], compressed, modulus)
 
+            
 def next_required_intermediate(start):
     complement = 0
     for section in range(64, -1, -1):
         # Round up the range
         bit = 1 << section
-        if bit & start != 0:
+        if bit & start > 0:
             complement = bit
     return start + complement
 
@@ -54,17 +68,9 @@ def get_intermediates(start, end, root, exponents, modulus):
     if start == 0:
         intermediates[start] = root
         return intermediates
-    previous = -1
     while True:
-        # Since we're looking for the compressed representation,
-        # We need to actually make sure to get the expanded representation of the previous intermediate
-        if previous == -1:
-            intermediates[start] = root
-        else:
-            intermediates[start] = top_bits(wind_encoder(root, previous, exponents, modulus), 128)
-        previous = start
+        intermediates[start] = wind_encoder_compressed(root, start, exponents, modulus)
         start = next_required_intermediate(start)
-        print(start)
         if start > end:
             break
     return intermediates
@@ -98,10 +104,10 @@ def pack_inter_positions(intermediates: dict):
 
 def pack_metadata(channel: int, modulus: int, start: int, end: int, forward_inters: dict, backward_inters: dict):
     res = channel.to_bytes(4, byteorder='big') + \
+        start.to_bytes(8, byteorder='big') + end.to_bytes(8, byteorder='big') + \
     	len(forward_inters).to_bytes(1, byteorder='big') + len(backward_inters).to_bytes(1, byteorder='big') + \
         pack_inter_positions(forward_inters) + pack_inter_positions(backward_inters) + \
-        modulus.to_bytes(128, byteorder='big') + \
-        start.to_bytes(8, byteorder='big') + end.to_bytes(8, byteorder='big')
+        modulus.to_bytes(128, byteorder='big')
     
     print(len(res))
     for _ in range(1280 - len(res)):

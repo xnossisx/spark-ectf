@@ -12,7 +12,7 @@ import json
 import gmpy2
 from sympy import isprime
 import time
-
+from blake3 import blake3
 
 def extended_gcd(a, b):
     """
@@ -48,21 +48,22 @@ def powmod(a, b, modulus, prime_1, prime_2):
 
     return gmpy2.f_mod(m_2 + (sub * prime_2), modulus)
 
-# Gets bits 2 - (bit + 1)
-def top_bits(n, bits):
-    return n >> (gmpy2.bit_length(n) - bits + 1) & ((1 << bits) - 1)
+# Hashes it with Blake3
+def compress(n, section):
+    compressed = int.from_bytes(blake3(section.to_bytes(1, byteorder="big")).update(n.to_bytes(128, byteorder="big")).digest()) & (2 ** 128 - 1)
+    return compressed
 
 
 def wind_encoder(root, target, exponents, modulus, p, q):
-    result = root
+    # If the root is already expanded, we may immediately begin the algorithm. If not, we assume it is the time 0 compressed form, which needs the base case expansion.
+    if gmpy2.bit_length(root) <= 128:
+        result = powmod(exponents[0], root, modulus, p, q)
+    else:
+        result = root
     for section in range(64, -1, -1):
         mask = 1 << section
-        times = (mask & target) >> section
-        for i in range(times):
-            if gmpy2.bit_length(result) > 128:
-                result = powmod(exponents[section], top_bits(result, 128), modulus, p, q)
-            else:
-                result = powmod(exponents[section], result, modulus, p, q)
+        if mask & target > 0:
+            result = powmod(exponents[section], compress(result, section), modulus, p, q)
     return result
 
 def get_primes_starting_with(start, amount): 
@@ -125,15 +126,12 @@ class Encoder:
         p = self.secrets[str(channel)]["p"]
         q = self.secrets[str(channel)]["q"]
 
-        if self.channel_cache != channel or timestamp & self.cache_mask != self.cached_timestamp:
+        if self.channel_cache != channel or (timestamp & self.cache_mask) != self.cached_timestamp:
             # Break the timestamp into two parts
             self.cached_timestamp = timestamp & self.cache_mask
             self.channel_cache = channel
-            self.cached_timestamp = timestamp
             forward_root = self.secrets[str(channel)]["forward"]
             backward_root = self.secrets[str(channel)]["backward"]
-
-
             self.cached_forward = wind_encoder(forward_root, self.cached_timestamp, self.exponents, modulus, p, q)
             self.cached_backward = wind_encoder(backward_root, (end_of_time - self.cached_timestamp) & self.cache_mask, self.exponents, modulus, p, q)
 
@@ -167,9 +165,12 @@ def main():
 
     encoder = Encoder(args.secrets.read())
     #encoder = Encoder(open("/home/bruberu/ps/MITREeCTF/spark-ectf/secrets/secrets.json", "rb").read())
-    repr(encoder.encode(args.channel, args.frame.encode(), args.timestamp))
+    start = time.time()
+    for i in range(0, 1000000, 1000):
+        print(repr(encoder.encode(args.channel, args.frame.encode(), args.timestamp)))
     #frame = json.loads(open("/home/bruberu/ps/MITREeCTF/spark-ectf/frames/x_c0.json", "rb").read())[0][1].encode()
-    print("Time taken: ", end)
+    diff = time.time() - start
+    print("Time taken: ", diff)
 
 
 if __name__ == "__main__":
