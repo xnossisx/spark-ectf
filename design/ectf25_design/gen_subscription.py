@@ -5,11 +5,13 @@ Date: 2025
 
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import hashlib
 from sympy import isprime
 import gmpy2
+import design.ectf25_design.prime_gen
 
 from loguru import logger
 from blake3 import blake3
@@ -25,7 +27,6 @@ def get_primes_starting_with(start, amount):
     return primes
 
 def compress(n, section):
-    print("{} {}".format(n, section))
     compressed = int.from_bytes(blake3(section.to_bytes(1, byteorder="big")).update(n.to_bytes(128, byteorder="big")).digest()) & (2 ** 128 - 1)
     return compressed
 
@@ -40,7 +41,6 @@ def wind_encoder_compressed(root, target, exponents, modulus):
     stop = get_last_on_bit(target) # For our case, we need to stop the bit rendering right before we expand the key.
     expanded = gmpy2.powmod(exponents[0], root, modulus) # Since we're in the encoder, we use the base-case exponent.
     compressed = root
-    print("hi {} {}".format(target, stop))
     for section in range(64, -1, -1):
         mask = 1 << section
         print(section, mask & target)
@@ -75,24 +75,16 @@ def get_intermediates(start, end, root, exponents, modulus):
             break
     return intermediates
 
-def get_intermediates_hashed(start, end, root, exponents, modulus, device_hash: int):
-    intermediates = get_intermediates(start, end, root, exponents, modulus)
-    for i in intermediates:
-        intermediates[i] = (intermediates[i] ^ device_hash)
-    return intermediates
-
 def pack_intermediates(intermediates: dict):
     res = b""
     positions = sorted(intermediates.keys())
     for position in positions:
-        print(intermediates[position])
         res += intermediates[position].to_bytes(16, byteorder="big")
     # Pack the remainder of the 1024 bytes
     for _ in range((64 * 16) - len(positions) * 16):
         res += b"\x00"
     return res
 
-# Produces a 512-byte string indicating the position of each intermediate
 def pack_inter_positions(intermediates: dict):
     res = b""
     positions = sorted(intermediates.keys())
@@ -103,13 +95,12 @@ def pack_inter_positions(intermediates: dict):
         res += b"\x00"
     return res
 
-# Len: 1280
-def pack_metadata(channel: int, modulus: int, start: int, end: int, forward_inters: dict, backward_inters: dict):
+def pack_metadata(channel: int, modulus: int, start: int, end: int, forward_inters: dict, backward_inters: dict, encryption_d, encryption_modulus):
     res = channel.to_bytes(4, byteorder='big') + \
         start.to_bytes(8, byteorder='big') + end.to_bytes(8, byteorder='big') + \
     	len(forward_inters).to_bytes(1, byteorder='big') + len(backward_inters).to_bytes(1, byteorder='big') + \
         pack_inter_positions(forward_inters) + pack_inter_positions(backward_inters) + \
-        modulus.to_bytes(128, byteorder='big')
+        pow(modulus, encryption_d, encryption_modulus).to_bytes(160, byteorder='big')
     
     print(len(res))
     for _ in range(1280 - len(res)):
@@ -139,11 +130,13 @@ def gen_subscription(
 
     end_of_time = 2**64 - 1
     forward_inters = get_intermediates(start, end, forward, exponents, modulus)
-    backward_inters = get_intermediates_hashed(end_of_time - end, end_of_time - start, backward, exponents, modulus, int.from_bytes(hashlib.sha3_512(device_id.to_bytes(4)).digest()) & 0xffffffffffffffff)
+
+    backward_inters = get_intermediates(end_of_time - end, end_of_time - start, backward, exponents, modulus)
     # Finally, we pack this like follows:
-    
+    print(design.ectf25_design.prime_gen.gen_keys_seed(1280, (device_id << 32) + channel))
+    p, q, e, d = design.ectf25_design.prime_gen.gen_keys_seed(1280, (device_id << 32) + channel)
     # Pack the subscription. This will be sent to the decoder with ectf25.tv.subscribe
-    return pack_metadata(channel, modulus, start, end, forward_inters, backward_inters) + \
+    return pack_metadata(channel, modulus, start, end, forward_inters, backward_inters, d, p * q) + \
         pack_intermediates(forward_inters) + pack_intermediates(backward_inters)
 
 def parse_args():

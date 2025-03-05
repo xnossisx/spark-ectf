@@ -35,10 +35,10 @@ def gen_secrets(channels: list[int]) -> bytes:
 
     for channel in channels:
         secrets[channel] = {}
-        (public, private) = rsa.newkeys(1024)
 
-        modulus = public.n
-        secrets[channel]["modulus"] = modulus
+        # For frame encoding
+        (public, private) = rsa.newkeys(1024)
+        secrets[channel]["modulus"] = public.n
         secrets[channel]["p"] = private.p
         secrets[channel]["q"] = private.q
         secrets[channel]["d"] = private.d

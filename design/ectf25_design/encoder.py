@@ -14,25 +14,6 @@ from sympy import isprime
 import time
 from blake3 import blake3
 
-def extended_gcd(a, b):
-    """
-    Extended Euclidean Algorithm to find GCD(a, b) and coefficients x, y such that ax + by = GCD(a, b).
-
-    Args:
-      a: First integer.
-      b: Second integer.
-
-    Returns:
-      A tuple (g, x, y) where g is GCD(a, b) and x, y are coefficients.
-    """
-    if b == 0:
-        return a, 1, 0
-    else:
-        g, x1, y1 = extended_gcd(b, a % b)
-        x = y1
-        y = x1 - (a // b) * y1
-        return g, x, y
-
 def fletcher32(bytes):
     a = list(bytes)
     b = [sum(a[:i])%65535 for i in range(len(a)+1)]
