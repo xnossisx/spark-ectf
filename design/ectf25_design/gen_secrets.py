@@ -30,9 +30,11 @@ def gen_secrets(channels: list[int]) -> bytes:
     # You can change this to generate any secret material
     # The secrets file will never be shared with attackers
     secrets = {}
-    secrets["channels"] = channels
 
     channels.append(0)  # Add the broadcast channel
+    secrets["channels"] = channels
+
+
     secrets["systemsecret"] = rsa.randnum.read_random_int(64)
     for channel in channels:
         secrets[channel] = {}
