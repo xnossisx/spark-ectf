@@ -28,11 +28,11 @@ moduli = [key[0] * key[1] for key in keys]
 privates = [key[3] for key in keys]
 
 # Export the moduli and private keys to files
-open("moduli.bin", "wb").write(b"".join([modulus.to_bytes(160, byteorder="big") for modulus in moduli]))
-open("privates.bin", "wb").write(b"".join([private.to_bytes(160, byteorder="big") for private in privates]))
+open("src/moduli.bin", "wb").write(b"".join([modulus.to_bytes(160, byteorder="big") for modulus in moduli]))
+open("src/privates.bin", "wb").write(b"".join([private.to_bytes(160, byteorder="big") for private in privates]))
 
 # Generate the channel 0 subscription 
-open("emergency.bin", "wb").write(gen_subscription.gen_subscription(secretsfile, 0, 0, 2**64 - 1, 0))
+open("src/emergency.bin", "wb").write(gen_subscription.gen_subscription(secretsfile, 0, 0, 2**64 - 1, 0))
 print("Emergency subscription generated")
 
 # Set the CHANNELS env variable to the channels (other than 0) concatenated with commas

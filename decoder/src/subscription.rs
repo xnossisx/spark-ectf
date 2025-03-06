@@ -1,3 +1,4 @@
+use alloc::format;
 use crate::{flash, Integer, INTERMEDIATE_LOC, INTERMEDIATE_NUM, INTERMEDIATE_SIZE, SUB_LOC, SUB_SIZE};
 use alloc::vec::Vec;
 use blake3::Hasher;
@@ -8,6 +9,7 @@ use crypto_bigint::modular::{MontyForm, MontyParams};
 use crypto_bigint::{Encoding, Odd, U128, U512};
 use hal;
 use hal::flc::Flc;
+use crate::console::write_console;
 
 /// Indicate test keys to protect against tampering
 const FORWARD: u64 = 0x1f8c25d4b902e785;
@@ -72,14 +74,20 @@ impl Subscription {
     }
 
     pub fn get_intermediate(&self, flash: &hal::flc::Flc, pos: usize, dir: u64) -> U128 {
+        if self.location == 0 { // Emergency channel
+            let sub_bytes = include_bytes!("emergency.bin");
+            let intermediate_pos = INTERMEDIATE_LOC as usize + pos * INTERMEDIATE_SIZE + if dir == FORWARD {0} else {1024};
+            return U128::from_be_bytes(sub_bytes[intermediate_pos..intermediate_pos+16].try_into().unwrap());
+        }
+        
         let ref_location = if dir == FORWARD
-            {self.location + (INTERMEDIATE_LOC as usize) + pos * INTERMEDIATE_SIZE as usize}
+            {self.location + (INTERMEDIATE_LOC as usize) + pos * INTERMEDIATE_SIZE }
         else
-            {self.location + (INTERMEDIATE_LOC as usize) + 1024 + pos * INTERMEDIATE_SIZE as usize};
+            {self.location + (INTERMEDIATE_LOC as usize) + 1024 + pos * INTERMEDIATE_SIZE };
         let ref_location = ref_location as u32;
-        let intermediate_buffer: RefCell<[u8; INTERMEDIATE_SIZE as usize]> = RefCell::new([0; INTERMEDIATE_SIZE]);
+        let intermediate_buffer: RefCell<[u8; INTERMEDIATE_SIZE]> = RefCell::new([0; INTERMEDIATE_SIZE]);
         unsafe {
-            let _ = flash::read_bytes(flash, ref_location, &mut (*intermediate_buffer.as_ptr())[0..INTERMEDIATE_SIZE], INTERMEDIATE_SIZE as usize);
+            let _ = flash::read_bytes(flash, ref_location, &mut (*intermediate_buffer.as_ptr())[0..INTERMEDIATE_SIZE], INTERMEDIATE_SIZE);
             U128::from_be_bytes((*intermediate_buffer.as_ptr()).try_into().unwrap())
         }
     }
@@ -101,10 +109,13 @@ impl Subscription {
             }
         }
 
+        write_console(format!("closest pos: {}\n", closest_pos).as_bytes());
         let intermediate: U128 = self.get_intermediate(&flash, closest_idx, dir);
+        write_console(b"got the intermediate\n");
         let monty = MontyForm::new(&Integer::from(PRIMES[Self::get_lowest_bit(closest_pos)]), MontyParams::new(self.n)).pow(&intermediate);
         let mut result: Integer = monty.retrieve();
         // Takes the result to be the top exponent of a power tower of primes
+        write_console(b"expanded\n");
 
         let mut idx = INTERMEDIATE_NUM;
         loop {
@@ -123,6 +134,7 @@ impl Subscription {
 
     const ADJOINT: u128 = 0xffffffffffffffffffffffffffffffff;
     pub fn compress(n: Integer, section: u32) -> u128 {
+        write_console(b"compressing\n");
         let mut hasher: Hasher = blake3::Hasher::new();
         hasher.update(&section.to_be_bytes());
         hasher.update(&n.to_be_bytes());

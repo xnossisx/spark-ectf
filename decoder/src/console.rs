@@ -221,27 +221,32 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Subscription; 9]) {
                 }
                 // Allocates space for the bytes
                 let byte_list: &mut [u8] = core::slice::from_raw_parts_mut(alloc(layout), length as usize);
-                write_console(((length + 255) >> 8).to_string().as_bytes());
-
+                ack();
                 // Receives bytes
                 for i in 0..((length + 255) >> 8) {
                     //console.read_bytes(get_range(byte_list, i, length));
+                    
                     for byte in &mut *byte_list {
                         *byte = read_byte();
                     }
                     ack();
                 }
+                write_console(b"made it");
 
                 // Splits up the data
-                let channel: u32 = *bytemuck::from_bytes(&byte_list[0..4]);
-                let timestamp: u64 = *bytemuck::from_bytes(&byte_list[4..12]);
+                let channel: u32 = u32::from_be_bytes(*&byte_list[0..4].try_into().unwrap());
+                let timestamp: u64 = u64::from_be_bytes(*&byte_list[4..12].try_into().unwrap());
                 let frame: U1024 = <crate::Integer>::from_be_slice(byte_list[12..140].try_into().unwrap()); // 128 bytes
-                let checksum: u32 = *bytemuck::from_bytes(&byte_list[140..144]);
-                ack();
+                //let checksum: u32 = u32::from_be_bytes(*&byte_list[140..144].try_into().unwrap());
+                write_console(b"here too");
 
                 // Get the relevant subscription, and use it to decode
                 let sub = subscriptions.into_iter().filter(|s| s.channel == channel).next().unwrap();
+                write_console(format!("Channel: {}\n", sub.channel).as_bytes());
+
                 let decoded = sub.decode(flash, frame, timestamp);
+                write_console(b"here too");
+
                 let ret: [u8; 64] = decoded.to_be_bytes();
 
                 // Return the decoded bytes to the TV

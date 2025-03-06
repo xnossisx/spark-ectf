@@ -2,3 +2,4 @@ loguru
 gmpy2
 rsa
 sympy
+blake3
