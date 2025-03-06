@@ -12,80 +12,34 @@ import struct
 import typing
 import rsa.transform
 import subprocess
-
-def read_random_bits(nbits: int, random: rnd.Random) -> bytes:
-    """Reads 'nbits' random bits.
-
-    If nbits isn't a whole number of bytes, an extra byte will be appended with
-    only the lower bits set.
-    """
-
-    nbytes, rbits = divmod(nbits, 8)
-
-    # Get the random bytes
-    randomdata = random.randbytes(nbytes)
-
-    # Add the remaining random bits
-    if rbits > 0:
-        randomvalue = ord(random.getrandbits(1))
-        randomvalue >>= 8 - rbits
-        randomdata = struct.pack("B", randomvalue) + randomdata
-
-    return randomdata
-
-
-def read_random_int(nbits: int, random: rnd.Random) -> int:
-    """Reads a random integer of approximately nbits bits."""
-
-    randomdata = read_random_bits(nbits, random)
-    value = rsa.transform.bytes2int(randomdata)
-
-    # Ensure that the number is large enough to just fill out the required
-    # number of bits.
-    value |= 1 << (nbits - 1)
-
-    return value
-
-
-def read_random_odd_int(nbits: int, random: rnd.Random) -> int:
-    """Reads a random odd integer of approximately nbits bits.
-
-    >>> read_random_odd_int(512) & 1
-    1
-    """
-
-    value = read_random_int(nbits, random)
-
-    # Make sure it's odd
-    return value | 1
-
-def getprime(random: rnd.Random):
-    """Returns a prime number that can be stored in 'nbits' bits."""
-    def getprimeseed(nbits: int) -> int:
-    
-        assert nbits > 3  # the loop will hang on too small numbers
-    
-        while True:
-            integer = read_random_odd_int(nbits, random)
-    
-            # Test for primeness
-            if rsa.prime.is_prime(integer):
-                return integer
-    
-                # Retry if not prime
-    return getprimeseed
-
-def gen_keys_seed(
-        nbits: int,
-        seed: int,
-) -> typing.Tuple:
-    return rsa.key.gen_keys(nbits, getprime(rnd.Random(seed)))
-
+import prime_gen
+import gen_subscription
 # Get decoder ID environment variable
 decoder_id = os.getenv("DECODER_ID")
 
 # Generate a seed for each channel; you need a secret from secrets/secrets.json
-secrets = json.loads(os.open("secrets/secrets.json", os.O_RDONLY))
+secretsfile = open("secrets/secrets.json").read()
+secrets = json.loads(secretsfile)
 secret = secrets["systemsecret"]
 channels = secrets["channels"]
-seeds = [gen_keys_seed(1280, (secret << 64) + (decoder_id << 32) + channel) for channel in channels]
+keys = [prime_gen.gen_keys_seed(1280, (secret << 64) + (int(decoder_id, base=0) << 32) + channel) for channel in channels]
+print("Keys generated")
+moduli = [key[0] * key[1] for key in keys]
+privates = [key[3] for key in keys]
+
+# Export the moduli and private keys to files
+open("moduli.bin", "wb").write(b"".join([modulus.to_bytes(160, byteorder="big") for modulus in moduli]))
+open("privates.bin", "wb").write(b"".join([private.to_bytes(160, byteorder="big") for private in privates]))
+
+# Generate the channel 0 subscription 
+open("emergency.bin", "wb").write(gen_subscription.gen_subscription(secretsfile, 0, 0, 2**64 - 1, 0))
+print("Emergency subscription generated")
+
+# Set the CHANNELS env variable to the channels (other than 0) concatenated with commas
+os.putenv("CHANNELS", ",".join([str(channel) for channel in channels if channel != 0]))
+
+# Build the decoder
+subprocess.run(["cargo", "build", "--release"], cwd="/decoder")
+
+# Move the output to /out
+subprocess.run(["mv", "target/release/decoder", "/out"], cwd="/decoder")

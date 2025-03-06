@@ -126,7 +126,7 @@ pub fn ack() {
 /// Reads whatever the TV is sending over right now, and responds to it.
 /// @param subscriptions: A list of subscriptions.
 /// @param console: A reference to the UART console.
-pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Subscription; 8]) {
+pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Subscription; 9]) {
     // Check that the first byte is the magic byte %; otherwise, we return
     let magic = read_byte();
 

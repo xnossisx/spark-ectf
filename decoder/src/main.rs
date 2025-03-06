@@ -9,11 +9,14 @@ use core::alloc::GlobalAlloc;
 use core::cell::RefCell;
 use core::panic::PanicInfo;
 use cortex_m::delay::Delay;
-use crypto_bigint::{Encoding, Odd, Zero, U1024, U512};
+use crypto_bigint::{Encoding, Odd, Zero, U1024, U1280};
+use crypto_bigint::modular::{MontyForm, MontyParams};
 use embedded_alloc::LlffHeap;
 use hmac_sha512;
 
 type Integer = U1024;
+type EncryptedModulus = U1280;
+
 type Heap = LlffHeap;
 
 #[global_allocator]
@@ -76,7 +79,7 @@ fn main() -> ! {
     // Configure UART to host computer with 115200 8N1 settings
     let rx_pin = gpio0_pins.p0_0.into_af1();
     let tx_pin = gpio0_pins.p0_1.into_af1();
-    &console::init(p.uart0, &mut gcr.reg, rx_pin, tx_pin, &clks.pclk);
+    let _ = &console::init(p.uart0, &mut gcr.reg, rx_pin, tx_pin, &clks.pclk);
 
     let pins = hal::gpio::Gpio2::new(p.gpio2, &mut gcr.reg).split();
 
@@ -98,7 +101,7 @@ fn main() -> ! {
 
     // Load subscription from flash memory
     let flash = flash::init(p.flc, clks);
-    let mut subscriptions: [Subscription; 8] = load_subscriptions(&flash);
+    let mut subscriptions: [Subscription; 9] = load_subscriptions(&flash);
     
 
 
@@ -130,15 +133,15 @@ fn test(scan: u32, trng: &Trng, delay: &mut Delay) -> u32 {
  * Reads all subscriptions from the flash
  * Acts as a wrapper to load_subscription
  */
-fn load_subscriptions(flash: &hal::flc::Flc) -> [Subscription; 8] {
+fn load_subscriptions(flash: &hal::flc::Flc) -> [Subscription; 9] {
 
         // Page 1: Modulus, Channel, Start, End, Forward Count, Backward Count
         // Page 2: Forward exponents, Backward exponents
-        let mut ret = [Subscription::new(); 8];
+        let mut ret = [Subscription::new(); 9];
 
         //let layout = Layout::from_size_align((SUB_SIZE * 8) as usize, 8).unwrap();
         //let mut forward_backward: *mut u8 = alloc(layout);
-        for i in 0usize..8 {
+        for i in 0usize..9 {
             if !load_subscription(flash, &mut ret[i], i) {
                 break;
             }
@@ -193,8 +196,9 @@ fn load_subscription(flash: &hal::flc::Flc, subscription: &mut Subscription, cha
         pos += 2;
 
         write_console(b"hook");
-        subscription.n=Odd::<Integer>::new(Integer::from_be_bytes((*cache.as_ptr())[pos ..pos + 128].try_into().unwrap())).unwrap();
-        pos += 128;
+        let encrypted_modulus = EncryptedModulus::from_be_bytes((*cache.as_ptr())[pos ..pos + 160].try_into().unwrap());
+        subscription.n=Odd::<Integer>::new(decrypt_channel_modulus(encrypted_modulus, channel_pos as u32)).unwrap();
+        pos += 160;
 
         subscription.start=u64::from_be_bytes((*cache.as_ptr())[pos..pos+8].try_into().unwrap());
         pos += 8;
@@ -224,6 +228,22 @@ fn load_subscription(flash: &hal::flc::Flc, subscription: &mut Subscription, cha
     }
 
     true
+}
+
+
+fn decrypt_channel_modulus(encrypted_modulus: EncryptedModulus, channel_pos: u32) -> Integer {
+    // Choose the resulting 160-byte integer from moduli
+    let moduli = include_bytes!("moduli.bin");
+    let pos = (channel_pos * 160) as usize;
+    let modulus = Odd::<EncryptedModulus>::new(EncryptedModulus::from_be_bytes(&moduli[pos..pos+160])).unwrap();
+    // And the same from the private keys
+    let private_keys = include_bytes!("privates.bin");
+    let pos = (channel_pos * 32) as usize;
+    let private_key = EncryptedModulus::from_be_bytes(&private_keys[pos..pos+160]);
+    (&MontyForm::new(&encrypted_modulus, MontyParams::new_vartime(modulus)).pow(&private_key).retrieve()).into()
+}
+fn emergency_subscription() {
+
 }
 
 /**

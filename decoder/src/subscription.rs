@@ -3,6 +3,7 @@ use alloc::vec::Vec;
 use blake3::Hasher;
 use core::cell::RefCell;
 use core::hash::Hash;
+use core::mem;
 use crypto_bigint::modular::{MontyForm, MontyParams};
 use crypto_bigint::{Encoding, Odd, U128, U512};
 use hal;
@@ -31,7 +32,7 @@ pub fn get_subscriptions(flash: &hal::flc::Flc) -> Vec<SubStat> {
     let mut ret: Vec<SubStat> = Vec::new();
     for i in 0usize..8 {
         let mut data: [u8; 22] = [0;22];
-        let res = flash::read_bytes(flash, (SUB_LOC as u32) + (i as u32) * (SUB_SIZE as u32), &mut data, 22);
+        let _res = flash::read_bytes(flash, (SUB_LOC as u32) + (i as u32) * (SUB_SIZE as u32), &mut data, 22);
         if (data[0] == 0) || (data[0] == 0xff) { continue; }
         ret.push(SubStat{
             exists: (data[0] != 0 && data[0] != 0xff),
@@ -101,7 +102,7 @@ impl Subscription {
         }
 
         let intermediate: U128 = self.get_intermediate(&flash, closest_idx, dir);
-        let monty = MontyForm::new(&Integer::from(PRIMES[Self::get_lowest_bit(closest_pos)]), MontyParams::new(self.n)).pow(&U128::from(intermediate));
+        let monty = MontyForm::new(&Integer::from(PRIMES[Self::get_lowest_bit(closest_pos)]), MontyParams::new(self.n)).pow(&intermediate);
         let mut result: Integer = monty.retrieve();
         // Takes the result to be the top exponent of a power tower of primes
 
@@ -120,18 +121,19 @@ impl Subscription {
         result
     }
 
-    const adjoint: u128 = 2 ** 128 - 1;
+    const ADJOINT: u128 = 0xffffffffffffffffffffffffffffffff;
     pub fn compress(n: Integer, section: u32) -> u128 {
-        let hasher: Hasher = blake3::Hasher::new();
-        hasher.hash(section.to_be_bytes().as_mut_ref());
-        hasher.hash(&mut n.to_be_bytes());
-        let compressed = u128::from_be_bytes(hasher.finalize().as_bytes()) & Self::adjoint;
-        compressed
+        let mut hasher: Hasher = blake3::Hasher::new();
+        hasher.update(&section.to_be_bytes());
+        hasher.update(&n.to_be_bytes());
+        let binding = hasher.finalize();
+        let (res, _): (&[u8], &[_]) = binding.as_bytes().split_at(size_of::<u128>());
+        u128::from_be_bytes(res.try_into().unwrap()) & Self::ADJOINT
     }
 
     // Gets the lowest bit that is on: e.g. returns "2" from "0100".
-    pub fn get_lowest_bit(n: u64) -> u64 {
-        (n & -n).ilog2()
+    pub fn get_lowest_bit(n: u64) -> usize {
+        u64::ilog2(n & !n) as usize
     }
     pub fn decode(&self, flash: &hal::flc::Flc, target: Integer, timestamp: u64) -> U512 {
         let forward = self.decode_side(flash, FORWARD, timestamp);
