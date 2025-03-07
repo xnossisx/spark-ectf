@@ -7,7 +7,7 @@ use core::cell::RefCell;
 use core::hash::Hash;
 use core::mem;
 use crypto_bigint::modular::{MontyForm, MontyParams};
-use crypto_bigint::{Encoding, Monty, Odd, U1024, U128, U512, U64};
+use crypto_bigint::{Encoding, Odd, U1024, U128, U512};
 use crypto_bigint::subtle::ConditionallySelectable;
 use hal;
 use hal::flc::Flc;
@@ -151,12 +151,13 @@ impl Subscription {
 
     // Gets the lowest bit that is on: e.g. returns "2" from "0100".
     pub fn decode(&self, flash: &hal::flc::Flc, target: Integer, timestamp: u64) -> U512 {
-        write_console(self.n.to_string().as_bytes());
         let forward = self.decode_side(flash, timestamp, FORWARD);
+        write_console(forward.to_string().as_bytes());
         let backward = self.decode_side(flash, !timestamp, BACKWARD); // Technically passing in 2^64 - timestamp
+        write_console(backward.to_string().as_bytes());
 
         let guard = forward.bitxor(&backward);
-        (&MontyForm::new(&target, MontyParams::new(Odd::<Integer>::new(Integer::from(65537).try_into().unwrap()).unwrap())).pow(&guard).retrieve()).into()
+        (&(&(&MontyForm::new(&target, MontyParams::new(self.n))).pow(&Integer::from(65537u32)).retrieve()).bitxor(&guard)).into()
     }
 }
 pub fn trailing_zeroes_special(target: u64) -> usize {

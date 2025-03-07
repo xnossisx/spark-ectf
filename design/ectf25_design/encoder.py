@@ -122,6 +122,9 @@ class Encoder:
 
         forward = wind_encoder(self.cached_forward, extra, self.exponents, modulus, p, q)
         backward = wind_encoder(self.cached_backward, (end_of_time & ~self.cache_mask) - extra, self.exponents, modulus, p, q)
+        print(forward)
+        print(backward)
+
         guard = forward ^ backward
 
         encoded = powmod(int.from_bytes(frame) ^ guard, self.secrets[str(channel)]["d"], modulus, p, q).to_bytes(128, byteorder="big")
