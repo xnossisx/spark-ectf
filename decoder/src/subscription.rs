@@ -1,4 +1,5 @@
 use alloc::format;
+use alloc::string::ToString;
 use crate::{flash, Integer, INTERMEDIATE_LOC, INTERMEDIATE_NUM, INTERMEDIATE_SIZE, SUB_LOC, SUB_SIZE};
 use alloc::vec::Vec;
 use blake3::Hasher;
@@ -6,7 +7,8 @@ use core::cell::RefCell;
 use core::hash::Hash;
 use core::mem;
 use crypto_bigint::modular::{MontyForm, MontyParams};
-use crypto_bigint::{Encoding, Odd, U128, U512};
+use crypto_bigint::{Encoding, Monty, Odd, U1024, U128, U512, U64};
+use crypto_bigint::subtle::ConditionallySelectable;
 use hal;
 use hal::flc::Flc;
 use crate::console::write_console;
@@ -50,8 +52,8 @@ pub fn get_subscriptions(flash: &hal::flc::Flc) -> Vec<SubStat> {
 #[derive(Clone)]
 pub struct Subscription {
     pub(crate) n: Odd<Integer>,
-    pub(crate) forward_pos: [u64; INTERMEDIATE_NUM as usize],
-    pub(crate) backward_pos: [u64; INTERMEDIATE_NUM as usize],
+    pub(crate) forward_pos: [u64; INTERMEDIATE_NUM],
+    pub(crate) backward_pos: [u64; INTERMEDIATE_NUM],
     pub(crate) start: u64,
     pub(crate) end: u64,
     pub(crate) channel: u32,
@@ -111,17 +113,22 @@ impl Subscription {
 
         write_console(format!("closest pos: {}\n", closest_pos).as_bytes());
         let intermediate: U128 = self.get_intermediate(&flash, closest_idx, dir);
-        write_console(b"got the intermediate\n");
-        let monty = MontyForm::new(&Integer::from(PRIMES[Self::get_lowest_bit(closest_pos)]), MontyParams::new(self.n)).pow(&intermediate);
+        // The number of trailing zeros helps determine what step the intermediate is at! Perfect.
+        let params = MontyParams::new(self.n);
+        let mut monty = MontyForm::new(&Integer::from(PRIMES[trailing_zeroes_special(target)]), params).pow(&intermediate);
         let mut result: Integer = monty.retrieve();
         // Takes the result to be the top exponent of a power tower of primes
         write_console(b"expanded\n");
 
-        let mut idx = INTERMEDIATE_NUM;
+        let mut base: U1024 = U1024::ONE;
+                
+        let mut idx = INTERMEDIATE_NUM - 1;
         loop {
             let mask = 1 << idx;
             if mask & target != 0 {
-                let monty = MontyForm::new(&Integer::from(PRIMES[idx]), MontyParams::new(self.n)).pow(&U128::from(Self::compress(result, idx as u32)));
+                base = PRIMES[idx].try_into().unwrap();
+                //base = U1024::from(PRIMES[idx]);
+                monty = MontyForm::new(&base, params).pow(&(Self::compress(result, idx as u32)));
                 result = monty.retrieve();
             }
             if (idx == 0) {
@@ -132,26 +139,28 @@ impl Subscription {
         result
     }
 
-    const ADJOINT: u128 = 0xffffffffffffffffffffffffffffffff;
-    pub fn compress(n: Integer, section: u32) -> u128 {
-        write_console(b"compressing\n");
+
+    pub fn compress(n: Integer, section: u32) -> U128 {
         let mut hasher: Hasher = blake3::Hasher::new();
         hasher.update(&section.to_be_bytes());
         hasher.update(&n.to_be_bytes());
         let binding = hasher.finalize();
-        let (res, _): (&[u8], &[_]) = binding.as_bytes().split_at(size_of::<u128>());
-        u128::from_be_bytes(res.try_into().unwrap()) & Self::ADJOINT
+        let (res, _): (&[u8], &[_]) = binding.as_bytes().split_at(size_of::<U128>());
+        U128::from_be_bytes(res.try_into().unwrap())
     }
 
     // Gets the lowest bit that is on: e.g. returns "2" from "0100".
-    pub fn get_lowest_bit(n: u64) -> usize {
-        u64::ilog2(n & !n) as usize
-    }
     pub fn decode(&self, flash: &hal::flc::Flc, target: Integer, timestamp: u64) -> U512 {
-        let forward = self.decode_side(flash, FORWARD, timestamp);
+        write_console(self.n.to_string().as_bytes());
+        let forward = self.decode_side(flash, timestamp, FORWARD);
         let backward = self.decode_side(flash, !timestamp, BACKWARD); // Technically passing in 2^64 - timestamp
 
         let guard = forward.bitxor(&backward);
-        (&MontyForm::new(&target, MontyParams::new(self.n)).pow(&guard).retrieve()).into()
+        (&MontyForm::new(&target, MontyParams::new(Odd::<Integer>::new(Integer::from(65537).try_into().unwrap()).unwrap())).pow(&guard).retrieve()).into()
     }
 }
+pub fn trailing_zeroes_special(target: u64) -> usize {
+    if target == 0 {return 0;}
+    target.trailing_zeros() as usize
+}
+    

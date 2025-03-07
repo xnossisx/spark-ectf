@@ -8,8 +8,7 @@ import json
 from pathlib import Path
 from sympy import isprime
 import gmpy2
-import design.ectf25_design.prime_gen
-
+import prime_gen
 from loguru import logger
 from blake3 import blake3
 
@@ -73,36 +72,35 @@ def get_intermediates(start, end, root, exponents, modulus):
     return intermediates
 
 def pack_intermediates(intermediates: dict):
-    res = b""
+    _res = b""
     positions = sorted(intermediates.keys())
     for position in positions:
-        res += intermediates[position].to_bytes(16, byteorder="big")
+        _res += intermediates[position].to_bytes(16, byteorder="big")
     # Pack the remainder of the 1024 bytes
     for _ in range((64 * 16) - len(positions) * 16):
-        res += b"\x00"
-    return res
+        _res += b"\x00"
+    return _res
 
 def pack_inter_positions(intermediates: dict):
-    res = b""
+    _res = b""
     positions = sorted(intermediates.keys())
     for position in positions:
-        res += position.to_bytes(8, byteorder="big")
+        _res += position.to_bytes(8, byteorder="big")
     # Pack the remainder of the 512 bytes
     for _ in range(512 - len(positions) * 8):
-        res += b"\x00"
-    return res
+        _res += b"\x00"
+    return _res
 
 def pack_metadata(channel: int, modulus: int, start: int, end: int, forward_inters: dict, backward_inters: dict, encryption_e, encryption_modulus):
-    res = channel.to_bytes(4, byteorder='big') + \
+    _res = channel.to_bytes(4, byteorder='big') + \
         start.to_bytes(8, byteorder='big') + end.to_bytes(8, byteorder='big') + \
     	len(forward_inters).to_bytes(1, byteorder='big') + len(backward_inters).to_bytes(1, byteorder='big') + \
         pack_inter_positions(forward_inters) + pack_inter_positions(backward_inters) + \
         pow(modulus, encryption_e, encryption_modulus).to_bytes(160, byteorder='big')
     
-    print(len(res))
-    for _ in range(1280 - len(res)):
-        res += b"\x00"
-    return res
+    for _ in range(1280 - len(_res)):
+        _res += b"\x00"
+    return _res
 
 def gen_subscription(
     secrets: bytes, device_id: int, start: int, end: int, channel: int
@@ -130,7 +128,7 @@ def gen_subscription(
 
     backward_inters = get_intermediates(end_of_time - end, end_of_time - start, backward, exponents, modulus)
     # Finally, we pack this like follows:
-    p, q, e, d = design.ectf25_design.prime_gen.gen_keys_seed(1280, (device_id << 32) + channel)
+    p, q, e, d = prime_gen.gen_keys_seed(1280, (secrets["systemsecret"] << 64) + (int(device_id, base=0) << 32) + channel)
     # Pack the subscription. This will be sent to the decoder with ectf25.tv.subscribe
     return pack_metadata(channel, modulus, start, end, forward_inters, backward_inters, e, p * q) + \
         pack_intermediates(forward_inters) + pack_intermediates(backward_inters)

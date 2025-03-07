@@ -231,21 +231,18 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Subscription; 9]) {
                     }
                     ack();
                 }
-                write_console(b"made it");
 
                 // Splits up the data
                 let channel: u32 = u32::from_be_bytes(*&byte_list[0..4].try_into().unwrap());
                 let timestamp: u64 = u64::from_be_bytes(*&byte_list[4..12].try_into().unwrap());
                 let frame: U1024 = <crate::Integer>::from_be_slice(byte_list[12..140].try_into().unwrap()); // 128 bytes
                 //let checksum: u32 = u32::from_be_bytes(*&byte_list[140..144].try_into().unwrap());
-                write_console(b"here too");
 
                 // Get the relevant subscription, and use it to decode
-                let sub = subscriptions.into_iter().filter(|s| s.channel == channel).next().unwrap();
+                let sub = subscriptions.into_iter().filter(|s| s.channel == channel && s.n.bits() > 1).next().unwrap();
                 write_console(format!("Channel: {}\n", sub.channel).as_bytes());
 
                 let decoded = sub.decode(flash, frame, timestamp);
-                write_console(b"here too");
 
                 let ret: [u8; 64] = decoded.to_be_bytes();
 

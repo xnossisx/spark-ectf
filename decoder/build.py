@@ -31,9 +31,12 @@ privates = [key[3] for key in keys]
 open("src/moduli.bin", "wb").write(b"".join([modulus.to_bytes(160, byteorder="big") for modulus in moduli]))
 open("src/privates.bin", "wb").write(b"".join([private.to_bytes(160, byteorder="big") for private in privates]))
 
-# Generate the channel 0 subscription 
-open("src/emergency.bin", "wb").write(gen_subscription.gen_subscription(secretsfile, 0, 0, 2**64 - 1, 0))
+# Generate the channel 0 subscription
+sub = gen_subscription.gen_subscription(secretsfile, decoder_id, 0, 2**64 - 1, 0)
+open("src/emergency.bin", "wb").write(gen_subscription.gen_subscription(secretsfile, decoder_id, 0, 2**64 - 1, 0))
 print("Emergency subscription generated")
+
+
 
 # Set the CHANNELS env variable to the channels (other than 0) concatenated with commas
 os.putenv("CHANNELS", ",".join([str(channel) for channel in channels if channel != 0]))

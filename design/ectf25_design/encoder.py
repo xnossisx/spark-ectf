@@ -80,6 +80,7 @@ class Encoder:
         self.secrets = secrets
 
     def encode(self, channel: int, frame: bytes, timestamp: int) -> bytes:
+    
         """The frame encoder function
 
         This will be called for every frame that needs to be encoded before being
@@ -102,6 +103,7 @@ class Encoder:
 
         
         modulus = self.secrets[str(channel)]["modulus"]
+        print(modulus)
         totient = (self.secrets[str(channel)]["p"] - 1) * (self.secrets[str(channel)]["q"] - 1)
         end_of_time = 2**64 - 1
         p = self.secrets[str(channel)]["p"]
@@ -137,22 +139,15 @@ def main():
     """
     parser = argparse.ArgumentParser(prog="ectf25_design.encoder")
     parser.add_argument(
-        "secrets", type=argparse.FileType("rb"), help="Path to the secrets file"
+        "secrets_file", type=argparse.FileType("rb"), help="Path to the secrets file"
     )
     parser.add_argument("channel", type=int, help="Channel to encode for")
     parser.add_argument("frame", help="Contents of the frame")
     parser.add_argument("timestamp", type=int, help="64b timestamp to use")
     args = parser.parse_args()
 
-    encoder = Encoder(args.secrets.read())
-    #encoder = Encoder(open("/home/bruberu/ps/MITREeCTF/spark-ectf/secrets/secrets.json", "rb").read())
-    start = time.time()
-    for i in range(0, 1000000, 1000):
-        print(repr(encoder.encode(args.channel, args.frame.encode(), args.timestamp)))
-    #frame = json.loads(open("/home/bruberu/ps/MITREeCTF/spark-ectf/frames/x_c0.json", "rb").read())[0][1].encode()
-    diff = time.time() - start
-    print("Time taken: ", diff)
-
+    encoder = Encoder(args.secrets_file.read())
+    print(repr(encoder.encode(args.channel, args.frame.encode(), args.timestamp)))
 
 if __name__ == "__main__":
     main()
