@@ -42,7 +42,7 @@ print("Emergency subscription generated")
 os.putenv("CHANNELS", ",".join([str(channel) for channel in channels if channel != 0]))
 
 # Build the decoder
-subprocess.run(["cargo", "build", "--release"], cwd="/decoder")
+subprocess.run(["cargo", "build", "--release"], cwd="./decoder")
 
 # Move the output to /out
-subprocess.run(["mv", "target/release/decoder", "/out"], cwd="/decoder")
+subprocess.run(["mv", "target/release/decoder", "/out"], cwd="./decoder")

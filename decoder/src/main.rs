@@ -102,8 +102,8 @@ fn main() -> ! {
 
     // Load subscription from flash memory
     let flash = flash::init(p.flc, clks);
-    let mut subscriptions: [Subscription; 9] = load_subscriptions(&flash);
-    
+    //let mut subscriptions: [Subscription; 9] = load_subscriptions(&flash);
+    let mut moduli: [ConstDivisor; 9] = load_moduli(&flash);
 
 
     // Fundamental event loop
@@ -113,7 +113,7 @@ fn main() -> ! {
 
         let output = test(test_val, &trng, &mut delay);
         if test_val*test_val == output {
-            console::read_resp(&flash, &mut subscriptions);
+            console::read_resp(&flash, &mut moduli);
         }
     }
 }
@@ -125,6 +125,19 @@ fn test(scan: u32, trng: &Trng, delay: &mut Delay) -> u32 {
     let ret = scan*scan;
     delay.delay_us(5u32 + (trng.gen_u32() & 511));
     return ret
+}
+
+fn load_moduli(flash: &hal::flc::Flc) -> [ConstDivisor; 9] {
+    let mut ret  = core::array::from_fn(|i| ConstDivisor::new(UBig::from(0)));
+    let mut cache: [u8; 160] = [0; 160];
+
+    for i in 0usize..8 {
+        let pos = (SUB_SPACE as usize) * i + INTERMEDIATE_POS_SIZE * INTERMEDIATE_NUM + 22usize;
+        flash::read_bytes(flash, pos as u32, &mut cache, 160);
+        let encrypted_modulus = UBig::from_be_bytes(&cache[0..160]);
+        ret[i]=decrypt_channel_modulus(encrypted_modulus, i as u32);
+    }
+    ret
 }
 
 /**
@@ -226,16 +239,17 @@ fn decrypt_channel_modulus(encrypted_modulus: UBig, channel_pos: u32) -> ConstDi
     // Choose the resulting 160-byte integer from moduli
     let moduli = include_bytes!("moduli.bin");
     let pos = (channel_pos * 160) as usize;
-    let modulus = ConstDivisor::new(UBig::from_be_bytes(*&moduli[pos..pos+160].try_into().unwrap()));
+    let modulus = ConstDivisor::new(UBig::from_be_bytes(moduli[pos..pos+160].try_into().unwrap()));
 
     // And the same from the private keys
     let private_keys = include_bytes!("privates.bin");
     let pos = (channel_pos * 160) as usize;
-    let private_key = UBig::from_be_bytes(*&private_keys[pos..pos + 160].try_into().unwrap());
+    let private_key = UBig::from_be_bytes(private_keys[pos..pos + 160].try_into().unwrap());
     //write_console(private_key.to_string().as_bytes());
 
-    let last = modulus.reduce(encrypted_modulus).pow(&private_key).residue();
-    ConstDivisor::new(last)
+    let last_s1 = modulus.reduce(encrypted_modulus);
+    let last_s2 =  last_s1.pow(&private_key).residue();
+    ConstDivisor::new(last_s2)
 }
 fn load_emergency_subscription(subscription: &mut Subscription) {
     let cache = include_bytes!("emergency.bin");

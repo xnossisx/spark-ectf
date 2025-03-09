@@ -9,6 +9,7 @@ use core::alloc::Layout;
 use core::cmp::min;
 use core::mem::MaybeUninit;
 use cortex_m::asm::nop;
+use dashu_int::fast_div::ConstDivisor;
 use dashu_int::ops::BitTest;
 use dashu_int::UBig;
 use hal::gcr::clocks::{Clock, PeripheralClock, SystemClockResults};
@@ -127,7 +128,7 @@ pub fn ack() {
 /// Reads whatever the TV is sending over right now, and responds to it.
 /// @param subscriptions: A list of subscriptions.
 /// @param console: A reference to the UART console.
-pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Subscription; 9]) {
+pub fn read_resp(flash: &hal::flc::Flc, moduli: &mut [ConstDivisor; 9]) {
     // Check that the first byte is the magic byte %; otherwise, we return
     let magic = read_byte();
 
@@ -208,7 +209,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Subscription; 9]) {
                     ack();
                 }
                 // Load subscription and send debug information
-                load_subscription(flash, &mut subscriptions[channel as usize], channel as usize);
+                //load_subscription(flash, &mut subscriptions[channel as usize], channel as usize);
                 write_comm(b"",b'S');
             }
             b'D' => {
@@ -240,8 +241,8 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Subscription; 9]) {
                 //let checksum: u32 = u32::from_be_bytes(*&byte_list[140..144].try_into().unwrap());
 
                 // Get the relevant subscription, and use it to decode
-                let sub = subscriptions.into_iter().filter(|s| s.channel == channel && s.n.value().bit_len() > 1).next().unwrap();
-                write_console(format!("Channel: {}\n", sub.channel).as_bytes());
+                let sub = moduli[get_loc_for_channel(channel)];
+                write_console(format!("Channel: {}\n", channel).as_bytes());
 
                 let decoded = sub.decode(flash, frame, timestamp);
 
