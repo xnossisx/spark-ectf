@@ -7,7 +7,7 @@ use core::cell::RefCell;
 use core::hash::Hash;
 use core::mem;
 use crypto_bigint::modular::{MontyForm, MontyParams};
-use crypto_bigint::{Encoding, Odd, U1024, U128, U512};
+use crypto_bigint::{BitOps, Encoding, Odd, Uint, U1024, U128, U512};
 use crypto_bigint::subtle::ConditionallySelectable;
 use hal;
 use hal::flc::Flc;
@@ -111,37 +111,27 @@ impl Subscription {
             }
         }
 
-        write_console(format!("closest pos: {}\n", closest_pos).as_bytes());
-        let intermediate: U128 = self.get_intermediate(&flash, closest_idx, dir);
+        let mut compressed: U128 = self.get_intermediate(&flash, closest_idx, dir);
         // The number of trailing zeros helps determine what step the intermediate is at! Perfect.
-        let params = MontyParams::new(self.n);
-        let mut monty = MontyForm::new(&Integer::from(PRIMES[trailing_zeroes_special(target)]), params).pow(&intermediate);
-        let mut result: Integer = monty.retrieve();
-        // Takes the result to be the top exponent of a power tower of primes
-        write_console(b"expanded\n");
-
-        let mut base: U1024 = U1024::ONE;
-                
+         
         let mut idx = INTERMEDIATE_NUM - 1;
         loop {
             let mask = 1 << idx;
             if mask & target != 0 {
-                base = PRIMES[idx].try_into().unwrap();
-                //base = U1024::from(PRIMES[idx]);
-                monty = MontyForm::new(&base, params).pow(&(Self::compress(result, idx as u32)));
-                result = monty.retrieve();
+                compressed = Self::compress(compressed, idx as u32);
             }
             if (idx == 0) {
                 break;
             }
             idx -= 1;
         }
-        result
+        // (&MontyForm::new(&Integer::from(&compressed), MontyParams::new(self.n))).pow(&Integer::from(PRIMES[idx])).retrieve()
+        Integer::ONE + Integer::from(&compressed)
     }
 
 
-    pub fn compress(n: Integer, section: u32) -> U128 {
-        let mut hasher: Hasher = blake3::Hasher::new();
+    pub fn compress(n: U128, section: u32) -> U128 {
+        let mut hasher: Hasher = Hasher::new();
         hasher.update(&section.to_be_bytes());
         hasher.update(&n.to_be_bytes());
         let binding = hasher.finalize();
@@ -152,12 +142,13 @@ impl Subscription {
     // Gets the lowest bit that is on: e.g. returns "2" from "0100".
     pub fn decode(&self, flash: &hal::flc::Flc, target: Integer, timestamp: u64) -> U512 {
         let forward = self.decode_side(flash, timestamp, FORWARD);
-        write_console(forward.to_string().as_bytes());
+        //write_console(forward.to_string().as_bytes());
         let backward = self.decode_side(flash, !timestamp, BACKWARD); // Technically passing in 2^64 - timestamp
-        write_console(backward.to_string().as_bytes());
+        //write_console(backward.to_string().as_bytes());
 
-        let guard = forward.bitxor(&backward);
-        (&(&(&MontyForm::new(&target, MontyParams::new(self.n))).pow(&Integer::from(65537u32)).retrieve()).bitxor(&guard)).into()
+        let guard: Integer = forward.bitxor(&backward);
+        // (&(&(&MontyForm::new(&target, MontyParams::new(self.n))).pow(&Integer::from(65537u32)).retrieve()).bitxor(&guard)).into()
+        U512::from(guard.log2_bits())
     }
 }
 pub fn trailing_zeroes_special(target: u64) -> usize {

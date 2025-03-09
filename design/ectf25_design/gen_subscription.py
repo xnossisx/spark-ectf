@@ -6,11 +6,13 @@ Date: 2025
 import argparse
 import json
 from pathlib import Path
+import random
 from sympy import isprime
 import gmpy2
 import prime_gen
 from loguru import logger
 from blake3 import blake3
+from Crypto.Cipher import AES
 
 
 def get_primes_starting_with(start, amount): 
@@ -91,16 +93,23 @@ def pack_inter_positions(intermediates: dict):
         _res += b"\x00"
     return _res
 
-def pack_metadata(channel: int, modulus: int, start: int, end: int, forward_inters: dict, backward_inters: dict, encryption_e, encryption_modulus):
+def pack_metadata(channel: int, modulus: int, start: int, end: int, forward_inters: dict, backward_inters: dict, seed):
     _res = channel.to_bytes(4, byteorder='big') + \
         start.to_bytes(8, byteorder='big') + end.to_bytes(8, byteorder='big') + \
     	len(forward_inters).to_bytes(1, byteorder='big') + len(backward_inters).to_bytes(1, byteorder='big') + \
         pack_inter_positions(forward_inters) + pack_inter_positions(backward_inters) + \
-        pow(modulus, encryption_e, encryption_modulus).to_bytes(160, byteorder='big')
+        encrypt(modulus.to_bytes(128, byteorder='big'), seed)
     
     for _ in range(1280 - len(_res)):
         _res += b"\x00"
     return _res
+
+def encrypt(data, seed):
+    key = random.Random(seed).randbytes(32)
+
+    cipher = AES.new(key[:16], AES.MODE_OFB, iv=key[16:])
+
+    return cipher.encrypt(data)
 
 def gen_subscription(
     secrets: bytes, device_id: int, start: int, end: int, channel: int
@@ -128,9 +137,10 @@ def gen_subscription(
 
     backward_inters = get_intermediates(end_of_time - end, end_of_time - start, backward, exponents, modulus)
     # Finally, we pack this like follows:
-    p, q, e, d = prime_gen.gen_keys_seed(1280, (secrets["systemsecret"] << 64) + (int(device_id, base=0) << 32) + channel)
+    secret = (secrets["systemsecret"] << 64) + (int(device_id, base=0) << 32) + channel
+
     # Pack the subscription. This will be sent to the decoder with ectf25.tv.subscribe
-    return pack_metadata(channel, modulus, start, end, forward_inters, backward_inters, e, p * q) + \
+    return pack_metadata(channel, modulus, start, end, forward_inters, backward_inters, secret) + \
         pack_intermediates(forward_inters) + pack_intermediates(backward_inters)
 
 def parse_args():

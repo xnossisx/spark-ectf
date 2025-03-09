@@ -9,13 +9,12 @@ use core::alloc::GlobalAlloc;
 use core::cell::RefCell;
 use core::panic::PanicInfo;
 use cortex_m::delay::Delay;
-use crypto_bigint::{Encoding, Odd, Zero, U1024, U1280};
+use crypto_bigint::{Encoding, Int, Odd, Zero, U1024};
 use crypto_bigint::modular::{MontyForm, MontyParams};
 use embedded_alloc::LlffHeap;
 use hmac_sha512;
 
 type Integer = U1024;
-type EncryptedModulus = U1280;
 
 type Heap = LlffHeap;
 
@@ -29,6 +28,7 @@ mod subscription;
 
 extern crate alloc;
 pub extern crate max7800x_hal as hal;
+extern crate aes as encrypt_aes;
 const SUB_SPACE: u32 = 8192; /* page length */
 const SUB_SIZE: usize = 4+2+64+64+128+8+8+1024+1024;
 /* channel # + intermediate lengths + intermediate references + modulus + start + end +
@@ -38,13 +38,17 @@ pub const INTERMEDIATE_NUM: usize = 64;
 pub const INTERMEDIATE_LOC: u32 = 1280;
 pub const INTERMEDIATE_SIZE: usize = 16;
 pub const INTERMEDIATE_POS_SIZE: usize = 8;
+
+type Aes128Ofb = ofb::Ofb<encrypt_aes::Aes128>;
 pub 
 
 use hal::entry;
 use hal::flc::FlashError;
 pub use hal::pac;
+use ofb::cipher::{KeyIvInit, StreamCipher};
 use flash::flash;
 use crate::console::{cons, console, write_console};
+use crate::pac::aes;
 use crate::subscription::Subscription;
 // you can put a breakpoint on `rust_begin_unwind` to catch panics
 // use panic_itm as _; // logs messages over ITM; requires ITM support
@@ -214,9 +218,10 @@ fn load_subscription(flash: &hal::flc::Flc, subscription: &mut Subscription, cha
             subscription.backward_pos[j] = val;
         }
         pos += INTERMEDIATE_POS_SIZE * INTERMEDIATE_NUM;
-        let encrypted_modulus = EncryptedModulus::from_be_bytes((*cache.as_ptr())[pos ..pos + 160].try_into().unwrap());
-        subscription.n=Odd::<Integer>::new(decrypt_channel_modulus(encrypted_modulus, channel_pos as u32)).unwrap();
-        pos += 160;
+        let mut modulus = (*cache.as_ptr())[pos..pos + 128].try_into().unwrap();
+        decrypt_channel_modulus(&mut modulus, channel_pos as u32);
+        subscription.n=Odd::<Integer>::new(Integer::from_be_bytes(modulus.try_into().unwrap())).unwrap();
+        pos += 128;
 
     }
 
@@ -224,19 +229,16 @@ fn load_subscription(flash: &hal::flc::Flc, subscription: &mut Subscription, cha
 }
 
 
-fn decrypt_channel_modulus(encrypted_modulus: EncryptedModulus, channel_pos: u32) -> Integer {
-    // Choose the resulting 160-byte integer from moduli
-    let moduli = include_bytes!("moduli.bin");
-    let pos = (channel_pos * 160) as usize;
-    let modulus = Odd::<EncryptedModulus>::new(EncryptedModulus::from_be_bytes(*&moduli[pos..pos+160].try_into().unwrap())).unwrap();
+fn decrypt_channel_modulus(encrypted_modulus: &mut [u8; 128], channel_pos: u32) {
+    // Get the right AES key
+    let private_keys = include_bytes!("keys.bin");
+    let pos = (channel_pos * 32) as usize;
+    let key: [u8; 16] = private_keys[pos + 0..pos + 16].try_into().unwrap();
 
-    // And the same from the private keys
-    let private_keys = include_bytes!("privates.bin");
-    let pos = (channel_pos * 160) as usize;
-    let private_key = EncryptedModulus::from_be_bytes(*&private_keys[pos..pos + 160].try_into().unwrap());
-    //write_console(private_key.to_string().as_bytes());
+    let iv: [u8; 16] = private_keys[pos + 16..pos + 32].try_into().unwrap();
 
-    (&MontyForm::new(&encrypted_modulus, MontyParams::new_vartime(modulus)).pow(&private_key).retrieve()).into()
+    let mut cipher = Aes128Ofb::new(&key.into(), &iv.into());
+    cipher.apply_keystream(encrypted_modulus);
 }
 fn load_emergency_subscription(subscription: &mut Subscription) {
     let cache = include_bytes!("emergency.bin");
@@ -274,12 +276,10 @@ fn load_emergency_subscription(subscription: &mut Subscription) {
     }
     pos += INTERMEDIATE_POS_SIZE * INTERMEDIATE_NUM;
 
-    let encrypted_modulus = EncryptedModulus::from_be_bytes(cache[pos..pos + 160].try_into().unwrap());
-    write_console(get_loc_for_channel(0).to_string().as_bytes());
-
-    subscription.n=Odd::<Integer>::new(decrypt_channel_modulus(encrypted_modulus, get_loc_for_channel(0))).unwrap();
-    write_console(subscription.n.to_string().as_bytes());
-    pos += 160;
+    let mut modulus = cache[pos..pos + 128].try_into().unwrap();
+    decrypt_channel_modulus(&mut modulus, get_loc_for_channel(0));
+    subscription.n=Odd::<Integer>::new(Integer::from_be_bytes(modulus.try_into().unwrap())).unwrap();
+    pos += 128;
 }
 
 /**
@@ -308,7 +308,6 @@ pub fn get_channels() -> [u32; 9] {
 */
 fn get_loc_for_channel(channel: u32) -> u32 {
     let channels = get_channels();
-    write_console(format!("{:?}", channels).as_bytes());
     for i in 0..channels.len() {
         if channels[i] == channel {
             return i as u32;

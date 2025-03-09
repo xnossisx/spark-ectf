@@ -8,7 +8,8 @@ import os
 import random as rnd
 import rsa.common
 import rsa.prime
-import struct
+import random
+
 import typing
 import rsa.transform
 import subprocess
@@ -22,14 +23,15 @@ secretsfile = open("secrets/secrets.json").read()
 secrets = json.loads(secretsfile)
 secret = secrets["systemsecret"]
 channels = secrets["channels"]
-keys = [prime_gen.gen_keys_seed(1280, (secret << 64) + (int(decoder_id, base=0) << 32) + channel) for channel in channels]
-print("Keys generated")
-moduli = [key[0] * key[1] for key in keys]
-privates = [key[3] for key in keys]
 
-# Export the moduli and private keys to files
-open("src/moduli.bin", "wb").write(b"".join([modulus.to_bytes(160, byteorder="big") for modulus in moduli]))
-open("src/privates.bin", "wb").write(b"".join([private.to_bytes(160, byteorder="big") for private in privates]))
+def get_key_iv(seed) -> bytes:
+    return random.Random(seed).randbytes(32)
+
+keys = [get_key_iv((secret << 64) + (int(decoder_id, base=0) << 32) + channel) for channel in channels]
+print("Keys generated")
+
+# Export the keys to a file
+open("src/keys.bin", "wb").write(b"".join(keys))
 
 # Generate the channel 0 subscription
 sub = gen_subscription.gen_subscription(secretsfile, decoder_id, 0, 2**64 - 1, 0)
