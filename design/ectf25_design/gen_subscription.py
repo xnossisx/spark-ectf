@@ -48,7 +48,7 @@ def wind_encoder_compressed(root, target, exponents, modulus):
         if mask & target > 0:
             expanded = gmpy2.powmod(exponents[section], compressed, modulus)
 
-            
+
 def next_required_intermediate(start):
     complement = 0
     for section in range(64, -1, -1):
@@ -118,15 +118,14 @@ def gen_subscription(
     secrets = json.loads(secrets)
 
     modulus = secrets[str(channel)]["modulus"]
-    exponents = get_primes_starting_with(1025, 64)
+    exponents = get_primes_starting_with(1025, 16)
 
     forward = secrets[str(channel)]["forward"]
     backward = secrets[str(channel)]["backward"]
 
     end_of_time = 2**64 - 1
     forward_inters = get_intermediates(start, end, forward, exponents, modulus)
-
-    backward_inters = get_intermediates(end_of_time - end, end_of_time - start, backward, exponents, modulus)
+    backward_inters = get_intermediates_hashed(end_of_time - end, end_of_time - start, backward, exponents, modulus, hashlib.sha3_512(device_id.to_bytes(4)).digest())
     # Finally, we pack this like follows:
     p, q, e, d = prime_gen.gen_keys_seed(1280, (secrets["systemsecret"] << 64) + (int(device_id, base=0) << 32) + channel)
     # Pack the subscription. This will be sent to the decoder with ectf25.tv.subscribe
