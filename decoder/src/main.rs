@@ -9,13 +9,11 @@ use core::alloc::GlobalAlloc;
 use core::cell::RefCell;
 use core::panic::PanicInfo;
 use cortex_m::delay::Delay;
-use crypto_bigint::{Encoding, Odd, Zero, U1024, U1280};
-use crypto_bigint::modular::{MontyForm, MontyParams};
+use dashu_int::fast_div::ConstDivisor;
+use dashu_int::UBig;
 use embedded_alloc::LlffHeap;
 use hmac_sha512;
 
-type Integer = U1024;
-type EncryptedModulus = U1280;
 
 type Heap = LlffHeap;
 
@@ -136,7 +134,7 @@ fn test(scan: u32, trng: &Trng, delay: &mut Delay) -> u32 {
 fn load_subscriptions(flash: &hal::flc::Flc) -> [Subscription; 9] {
     // Page 1: Modulus, Channel, Start, End, Forward Count, Backward Count
     // Page 2: Forward exponents, Backward exponents
-    let mut ret = [Subscription::new(); 9];
+    let mut ret  = core::array::from_fn(|i| Subscription::new());
 
     //let layout = Layout::from_size_align((SUB_SIZE * 8) as usize, 8).unwrap();
     //let mut forward_backward: *mut u8 = alloc(layout);
@@ -214,8 +212,8 @@ fn load_subscription(flash: &hal::flc::Flc, subscription: &mut Subscription, cha
             subscription.backward_pos[j] = val;
         }
         pos += INTERMEDIATE_POS_SIZE * INTERMEDIATE_NUM;
-        let encrypted_modulus = EncryptedModulus::from_be_bytes((*cache.as_ptr())[pos ..pos + 160].try_into().unwrap());
-        subscription.n=Odd::<Integer>::new(decrypt_channel_modulus(encrypted_modulus, channel_pos as u32)).unwrap();
+        let encrypted_modulus = UBig::from_be_bytes((*cache.as_ptr())[pos ..pos + 160].try_into().unwrap());
+        subscription.n=decrypt_channel_modulus(encrypted_modulus, channel_pos as u32);
         pos += 160;
 
     }
@@ -224,19 +222,20 @@ fn load_subscription(flash: &hal::flc::Flc, subscription: &mut Subscription, cha
 }
 
 
-fn decrypt_channel_modulus(encrypted_modulus: EncryptedModulus, channel_pos: u32) -> Integer {
+fn decrypt_channel_modulus(encrypted_modulus: UBig, channel_pos: u32) -> ConstDivisor {
     // Choose the resulting 160-byte integer from moduli
     let moduli = include_bytes!("moduli.bin");
     let pos = (channel_pos * 160) as usize;
-    let modulus = Odd::<EncryptedModulus>::new(EncryptedModulus::from_be_bytes(*&moduli[pos..pos+160].try_into().unwrap())).unwrap();
+    let modulus = ConstDivisor::new(UBig::from_be_bytes(*&moduli[pos..pos+160].try_into().unwrap()));
 
     // And the same from the private keys
     let private_keys = include_bytes!("privates.bin");
     let pos = (channel_pos * 160) as usize;
-    let private_key = EncryptedModulus::from_be_bytes(*&private_keys[pos..pos + 160].try_into().unwrap());
+    let private_key = UBig::from_be_bytes(*&private_keys[pos..pos + 160].try_into().unwrap());
     //write_console(private_key.to_string().as_bytes());
 
-    (&MontyForm::new(&encrypted_modulus, MontyParams::new_vartime(modulus)).pow(&private_key).retrieve()).into()
+    let last = modulus.reduce(encrypted_modulus).pow(&private_key).residue();
+    ConstDivisor::new(last)
 }
 fn load_emergency_subscription(subscription: &mut Subscription) {
     let cache = include_bytes!("emergency.bin");
@@ -274,10 +273,10 @@ fn load_emergency_subscription(subscription: &mut Subscription) {
     }
     pos += INTERMEDIATE_POS_SIZE * INTERMEDIATE_NUM;
 
-    let encrypted_modulus = EncryptedModulus::from_be_bytes(cache[pos..pos + 160].try_into().unwrap());
+    let encrypted_modulus = UBig::from_be_bytes(cache[pos..pos + 160].try_into().unwrap());
     write_console(get_loc_for_channel(0).to_string().as_bytes());
 
-    subscription.n=Odd::<Integer>::new(decrypt_channel_modulus(encrypted_modulus, get_loc_for_channel(0))).unwrap();
+    subscription.n=decrypt_channel_modulus(encrypted_modulus, get_loc_for_channel(0));
     write_console(subscription.n.to_string().as_bytes());
     pos += 160;
 }
@@ -324,6 +323,5 @@ fn get_loc_for_channel(channel: u32) -> u32 {
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     write_console(format!("Panic: {}\n", _info).as_bytes());
-
     loop {}
 }

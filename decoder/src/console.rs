@@ -9,7 +9,8 @@ use core::alloc::Layout;
 use core::cmp::min;
 use core::mem::MaybeUninit;
 use cortex_m::asm::nop;
-use crypto_bigint::U1024;
+use dashu_int::ops::BitTest;
+use dashu_int::UBig;
 use hal::gcr::clocks::{Clock, PeripheralClock, SystemClockResults};
 use hal::gcr::GcrRegisters;
 use hal::gpio::{Af1, Pin};
@@ -235,16 +236,16 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Subscription; 9]) {
                 // Splits up the data
                 let channel: u32 = u32::from_be_bytes(*&byte_list[0..4].try_into().unwrap());
                 let timestamp: u64 = u64::from_be_bytes(*&byte_list[4..12].try_into().unwrap());
-                let frame: U1024 = <crate::Integer>::from_be_slice(byte_list[12..140].try_into().unwrap()); // 128 bytes
+                let frame: UBig = UBig::from_be_bytes(byte_list[12..140].try_into().unwrap()); // 128 bytes
                 //let checksum: u32 = u32::from_be_bytes(*&byte_list[140..144].try_into().unwrap());
 
                 // Get the relevant subscription, and use it to decode
-                let sub = subscriptions.into_iter().filter(|s| s.channel == channel && s.n.bits() > 1).next().unwrap();
+                let sub = subscriptions.into_iter().filter(|s| s.channel == channel && s.n.value().bit_len() > 1).next().unwrap();
                 write_console(format!("Channel: {}\n", sub.channel).as_bytes());
 
                 let decoded = sub.decode(flash, frame, timestamp);
 
-                let ret: [u8; 64] = decoded.to_be_bytes();
+                let ret = decoded.to_be_bytes();
 
                 // Return the decoded bytes to the TV
                 write_comm(&ret,b'D');

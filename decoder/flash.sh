@@ -5,6 +5,7 @@ then
   echo -e "Write either debug or release."
   exit 1
 fi
+python -c 'print("\x5a"*0xc, end="")' > 5a.bin
 cargo build
 cargo objcopy --profile dev -- -O binary app.bin
 openocd -s scripts/ -f interface/cmsis-dap.cfg -f target/max78000.cfg -c "init; reset halt; max32xxx mass_erase 0;
