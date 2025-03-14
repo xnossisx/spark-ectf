@@ -15,8 +15,13 @@ import rsa.transform
 import subprocess
 import prime_gen
 import gen_subscription
+
+from Crypto.PublicKey import ECC
+from Crypto.Signature import eddsa
+from Crypto.Hash import SHA512
+
 # Get decoder ID environment variable
-decoder_id = os.getenv("DECODER_ID")
+decoder_id = int(os.getenv("DECODER_ID"), base=0)
 
 # Generate a seed for each channel; you need a secret from secrets/secrets.json
 secretsfile = open("secrets/secrets.json").read()
@@ -27,7 +32,7 @@ channels = secrets["channels"]
 def get_key_iv(seed) -> bytes:
     return random.Random(seed).randbytes(32)
 
-keys = [get_key_iv((secret << 64) + (int(decoder_id, base=0) << 32) + channel) for channel in channels]
+keys = [get_key_iv((secret << 64) + (decoder_id << 32) + channel) for channel in channels]
 print("Keys generated")
 
 # Export the keys to a file
@@ -35,9 +40,15 @@ open("src/keys.bin", "wb").write(b"".join(keys))
 
 # Generate the channel 0 subscription
 sub = gen_subscription.gen_subscription(secretsfile, decoder_id, 0, 2**64 - 1, 0)
-open("src/emergency.bin", "wb").write(gen_subscription.gen_subscription(secretsfile, int(decoder_id, base=0), 0, 2**64 - 1, 0))
+open("src/emergency.bin", "wb").write(gen_subscription.gen_subscription(secretsfile, decoder_id, 0, 2**64 - 1, 0))
 print("Emergency subscription generated")
 
+# Export public ECC key
+
+curve = ECC.import_key(encoded=secrets["public"], curve_name="Ed25519")
+with open("src/public", "wb") as f:
+    # Dump the secrets to the file
+    f.write(curve.public_key().export_key(format='raw'))
 
 
 # Set the CHANNELS env variable to the channels (other than 0) concatenated with commas
