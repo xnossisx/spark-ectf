@@ -137,7 +137,7 @@ def gen_subscription(
 
     backward_inters = get_intermediates(end_of_time - end, end_of_time - start, backward, exponents, modulus)
     # Finally, we pack this like follows:
-    secret = (secrets["systemsecret"] << 64) + (int(device_id, base=0) << 32) + channel
+    secret = (secrets["systemsecret"] << 64) + (int(device_id) << 32) + channel
 
     # Pack the subscription. This will be sent to the decoder with ectf25.tv.subscribe
     return pack_metadata(channel, modulus, start, end, forward_inters, backward_inters, secret) + \

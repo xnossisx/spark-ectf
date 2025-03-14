@@ -10,7 +10,9 @@ use core::cell::RefCell;
 use core::panic::PanicInfo;
 use cortex_m::delay::Delay;
 use crypto_bigint::{Encoding, Int, Odd, Zero, U1024};
-use crypto_bigint::modular::{MontyForm, MontyParams};
+use ed25519_dalek::{VerifyingKey};
+use dashu_int::fast_div::ConstDivisor;
+use dashu_int::UBig;
 use embedded_alloc::LlffHeap;
 use hmac_sha512;
 
@@ -45,6 +47,7 @@ pub
 use hal::entry;
 use hal::flc::FlashError;
 pub use hal::pac;
+use hal::pac::cameraif::Ver;
 use ofb::cipher::{KeyIvInit, StreamCipher};
 use flash::flash;
 use crate::console::{cons, console, write_console};
@@ -58,7 +61,7 @@ use crate::subscription::Subscription;
 /**
  * The location of all of our subscription data on the flash
 */
-pub const SUB_LOC: *const u8 = 0x1001f000 as *const u8;
+pub const SUB_LOC: *const u8 = 0x10022000 as *const u8;
 
 #[entry]
 fn main() -> ! {
@@ -108,9 +111,9 @@ fn main() -> ! {
 
     // Load subscription from flash memory
     let flash = flash::init(p.flc, clks);
-    let mut subscriptions: [Subscription; 9] = load_subscriptions(&flash);
+    let mut subscriptions: [Option<Subscription>; 9] = load_subscriptions(&flash);
     
-
+    let divisor = load_verification_key();
 
     // Fundamental event loop
     loop {
@@ -119,7 +122,7 @@ fn main() -> ! {
 
         let output = test(test_val, &trng, &mut delay);
         if test_val*test_val == output {
-            console::read_resp(&flash, &mut subscriptions);
+            console::read_resp(&flash, &mut subscriptions, divisor);
         }
     }
 }
@@ -137,22 +140,19 @@ fn test(scan: u32, trng: &Trng, delay: &mut Delay) -> u32 {
  * Reads all subscriptions from the flash
  * Acts as a wrapper to load_subscription
  */
-fn load_subscriptions(flash: &hal::flc::Flc) -> [Subscription; 9] {
+fn load_subscriptions(flash: &hal::flc::Flc) -> [Option<Subscription>; 9] {
     // Page 1: Modulus, Channel, Start, End, Forward Count, Backward Count
     // Page 2: Forward exponents, Backward exponents
-    let mut ret = [Subscription::new(); 9];
+    let mut ret:[Option<Subscription>; 9] = [None; 9];
 
     //let layout = Layout::from_size_align((SUB_SIZE * 8) as usize, 8).unwrap();
     //let mut forward_backward: *mut u8 = alloc(layout);
-    for i in 0usize..8 {
-        if !load_subscription(flash, &mut ret[i], i) {
-            break;
-        }
+    for i in 1usize..get_channels().len()+1 {
+        ret[i] = load_subscription(flash, i);
     }
-    load_emergency_subscription(&mut ret[get_loc_for_channel(0) as usize]);
+    ret[0] = load_emergency_subscription();
     ret
 }
-
 
 /**
  * Reads a subscription from the flash
@@ -162,7 +162,8 @@ fn load_subscriptions(flash: &hal::flc::Flc) -> [Subscription; 9] {
  * @param subscription: A reference to a subscription being loaded
  * @return The success of the operation
  */
-fn load_subscription(flash: &hal::flc::Flc, subscription: &mut Subscription, channel_pos: usize) -> bool {
+fn load_subscription(flash: &hal::flc::Flc, channel_pos: usize) -> Option<Subscription> {
+    let mut subscription:Subscription=Subscription::new();
     let cache: RefCell<[u8; 2048 as usize]> = RefCell::new([0; 2048 as usize]);
     let mut pos: usize = 0;
     let result = flash.check_address(SUB_LOC as u32 + pos as u32);
@@ -178,14 +179,15 @@ fn load_subscription(flash: &hal::flc::Flc, subscription: &mut Subscription, cha
                 console::write_console(b"NeedsErase\n");
             }
         };
-        return false
+        return None
     }
     unsafe {
         let _ = flash::read_bytes(flash, SUB_LOC as u32 + pos as u32, &mut (*cache.as_ptr()), SUB_SIZE);
 
         let init = (*cache.as_ptr())[20]; // Should always be non-zero if it's loaded right
         if init == 0 || init == 0xFF {
-            return false;
+            write_console(format!("subscription not initialized: {}", channel_pos).into_bytes().as_slice());
+            return None;
         }
 
         subscription.location = channel_pos * SUB_SIZE;
@@ -220,12 +222,12 @@ fn load_subscription(flash: &hal::flc::Flc, subscription: &mut Subscription, cha
         pos += INTERMEDIATE_POS_SIZE * INTERMEDIATE_NUM;
         let mut modulus = (*cache.as_ptr())[pos..pos + 128].try_into().unwrap();
         decrypt_channel_modulus(&mut modulus, channel_pos as u32);
-        subscription.n=Odd::<Integer>::new(Integer::from_be_bytes(modulus.try_into().unwrap())).unwrap();
+        subscription.n=ConstDivisor::new(UBig::from_be_bytes(&modulus));
         pos += 128;
 
     }
-
-    true
+    drop(cache);
+    Some(subscription)
 }
 
 
@@ -240,13 +242,14 @@ fn decrypt_channel_modulus(encrypted_modulus: &mut [u8; 128], channel_pos: u32) 
     let mut cipher = Aes128Ofb::new(&key.into(), &iv.into());
     cipher.apply_keystream(encrypted_modulus);
 }
-fn load_emergency_subscription(subscription: &mut Subscription) {
+fn load_emergency_subscription() -> Option<Subscription> {
+    let mut subscription:Subscription=Subscription::new();
     let cache = include_bytes!("emergency.bin");
     let mut pos = 0;
     subscription.location = 0; // Done as a special case
     subscription.channel = u32::from_be_bytes(cache[pos..pos+4].try_into().unwrap());
     if subscription.channel != 0 {
-        return
+        return None;
     }
     pos += 4;
     subscription.start=u64::from_be_bytes(cache[pos..pos+8].try_into().unwrap());
@@ -278,8 +281,9 @@ fn load_emergency_subscription(subscription: &mut Subscription) {
 
     let mut modulus = cache[pos..pos + 128].try_into().unwrap();
     decrypt_channel_modulus(&mut modulus, get_loc_for_channel(0));
-    subscription.n=Odd::<Integer>::new(Integer::from_be_bytes(modulus.try_into().unwrap())).unwrap();
+    subscription.n=ConstDivisor::new(UBig::from_be_bytes(&modulus));
     pos += 128;
+    Some(subscription)
 }
 
 /**
@@ -302,6 +306,18 @@ pub fn get_channels() -> [u32; 9] {
     ret
 }
 
+/**
+* Loads the verification key for elliptic curve signatures
+*/
+fn load_verification_key() -> VerifyingKey {
+    let bytes = include_bytes!("verification.bin");
+    let attempt = VerifyingKey::from_bytes(bytes);
+    if attempt .is_err() {
+        console::write_err(format!("{}", attempt.err().unwrap()).as_bytes());
+        panic!();
+    }
+    attempt.unwrap()
+}
 /**
 * @input The channel ID
 * @output The location of the channel in the actual channel list in flash

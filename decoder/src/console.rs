@@ -10,6 +10,8 @@ use core::cmp::min;
 use core::mem::MaybeUninit;
 use cortex_m::asm::nop;
 use crypto_bigint::U1024;
+use dashu_int::ops::BitTest;
+use ed25519_dalek::{DigestVerifier, Signature, Verifier, VerifyingKey};
 use hal::gcr::clocks::{Clock, PeripheralClock, SystemClockResults};
 use hal::gcr::GcrRegisters;
 use hal::gpio::{Af1, Pin};
@@ -126,7 +128,7 @@ pub fn ack() {
 /// Reads whatever the TV is sending over right now, and responds to it.
 /// @param subscriptions: A list of subscriptions.
 /// @param console: A reference to the UART console.
-pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Subscription; 9]) {
+pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription>; 9], verifier: VerifyingKey) {
     // Check that the first byte is the magic byte %; otherwise, we return
     let magic = read_byte();
 
@@ -186,6 +188,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Subscription; 9]) {
                     for byte in &mut *byte_list {
                         *byte = read_byte();
                     }
+
                     if i == 0 {
                         // Casts the first 4 bytes to the channel value
                         channel = get_loc_for_channel(((byte_list[0] as u32) << 24) +
@@ -196,6 +199,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Subscription; 9]) {
                             flash.erase_page(pos).unwrap_or_else(|test| {
                                 write_err(flash::map_err(test).as_bytes());
                             });
+                            write_console(b"bored");
                         }
                     } else {
                         pos += 256;
@@ -207,7 +211,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Subscription; 9]) {
                     ack();
                 }
                 // Load subscription and send debug information
-                load_subscription(flash, &mut subscriptions[channel as usize], channel as usize);
+                subscriptions[channel] = load_subscription(flash, channel as usize);
                 write_comm(b"",b'S');
             }
             b'D' => {
@@ -224,8 +228,6 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Subscription; 9]) {
                 ack();
                 // Receives bytes
                 for i in 0..((length + 255) >> 8) {
-                    //console.read_bytes(get_range(byte_list, i, length));
-                    
                     for byte in &mut *byte_list {
                         *byte = read_byte();
                     }
@@ -235,16 +237,38 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Subscription; 9]) {
                 // Splits up the data
                 let channel: u32 = u32::from_be_bytes(*&byte_list[0..4].try_into().unwrap());
                 let timestamp: u64 = u64::from_be_bytes(*&byte_list[4..12].try_into().unwrap());
-                let frame: U1024 = <crate::Integer>::from_be_slice(byte_list[12..140].try_into().unwrap()); // 128 bytes
+                let frame: U1024 = <crate::Integer>::from_be_slice(&byte_list[12..140]); // 128 bytes
+                let signature: Signature = Signature::from_slice(&byte_list[140..204]).unwrap();
                 //let checksum: u32 = u32::from_be_bytes(*&byte_list[140..144].try_into().unwrap());
 
                 // Get the relevant subscription, and use it to decode
-                let sub = subscriptions.into_iter().filter(|s| s.channel == channel && s.n.bits() > 1).next().unwrap();
-                write_console(format!("Channel: {}\n", sub.channel).as_bytes());
+                let mut sub: Option<Subscription> = None;
+                for sub_i in subscriptions {
+                    if sub_i.is_some() && sub_i.clone().unwrap().channel == channel {
+                        sub = Some(sub_i.clone().unwrap());
+                        break;
+                    }
+                }
 
-                let decoded = sub.decode(flash, frame, timestamp);
+                if sub.is_none() {
+                    write_err(b"No channel for this frame!");
+                    return;
+                }
+
+                write_console(format!("Channel: {}\n", channel).as_bytes());
+
+                let decoded = sub.unwrap().decode(flash, frame, timestamp);
 
                 let ret: [u8; 64] = decoded.to_be_bytes();
+
+                let verifier_context = verifier.with_context(channel).unwrap();
+                let evaluation = verifier_context.verify_digest(ret, signature);
+
+                if evaluation.is_err() {
+                    write_err(b"Key verification failed - frame spoofing may be happening!");
+                    write_comm(b"Not the actual frame", b'D');
+                    return;
+                }
 
                 // Return the decoded bytes to the TV
                 write_comm(&ret,b'D');
