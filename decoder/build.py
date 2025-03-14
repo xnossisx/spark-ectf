@@ -35,7 +35,7 @@ open("src/keys.bin", "wb").write(b"".join(keys))
 
 # Generate the channel 0 subscription
 sub = gen_subscription.gen_subscription(secretsfile, decoder_id, 0, 2**64 - 1, 0)
-open("src/emergency.bin", "wb").write(gen_subscription.gen_subscription(secretsfile, decoder_id, 0, 2**64 - 1, 0))
+open("src/emergency.bin", "wb").write(gen_subscription.gen_subscription(secretsfile, int(decoder_id, base=0), 0, 2**64 - 1, 0))
 print("Emergency subscription generated")
 
 
