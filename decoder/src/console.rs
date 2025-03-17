@@ -130,6 +130,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
 
     if magic != MAGIC {
         write_console(b"that was not magic");
+        write_console(&[magic]);
         return;
     }
 
@@ -245,6 +246,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                 }
 
                 if sub.is_none() {
+                    write_console(channel.to_string().as_bytes());
                     write_err(b"No channel for this frame!");
                     return;
                 }

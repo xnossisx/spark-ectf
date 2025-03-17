@@ -49,11 +49,11 @@ def get_intermediates(start, end, root):
             break
     return intermediates
 
-def pack_intermediates(intermediates: dict):
+def pack_intermediates(intermediates: dict, secret: int):
     _res = b""
     positions = sorted(intermediates.keys())
     for position in positions:
-        _res += intermediates[position].to_bytes(16, byteorder="big")
+        _res += encrypt(intermediates[position].to_bytes(16, byteorder="big"), secret)
     # Pack the remainder of the 1024 bytes
     for _ in range((64 * 16) - len(positions) * 16):
         _res += b"\x00"
@@ -113,7 +113,7 @@ def gen_subscription(
 
     # Pack the subscription. This will be sent to the decoder with ectf25.tv.subscribe
     return pack_metadata(channel, start, end, forward_inters, backward_inters) + \
-        encrypt(pack_intermediates(forward_inters) + pack_intermediates(backward_inters), secret)
+        pack_intermediates(forward_inters, secret) + pack_intermediates(backward_inters, secret)
 
 def parse_args():
     """Define and parse the command line arguments
