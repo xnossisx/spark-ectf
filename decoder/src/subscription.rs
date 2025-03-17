@@ -139,9 +139,10 @@ impl Subscription {
         let (res, _): (&[u8], &[_]) = binding.as_bytes().split_at(size_of::<u128>());
         u128::from_be_bytes(res.try_into().unwrap())
     }
-    const BIG_BYTES: [u8; 64] =  [92, 207, 244, 72, 129, 31, 255, 254, 230, 111, 241, 17, 27, 180, 64, 8, 141, 214, 102, 111, 255, 255, 242, 35, 62, 229, 90, 171,
-        184, 130, 39, 123, 179, 51, 61, 222, 229, 82, 42, 162, 43, 179, 60, 206, 236, 203, 180, 65, 17, 21, 81, 16, 0, 1, 19, 50, 40, 142, 237, 208, 9, 145, 31, 251];
-    // Gets the lowest bit that is on: e.g. returns "2" from "0100".
+    const BIG_BYTES: [u8; 64] =  [92, 244, 129, 255, 230, 241, 27, 64, 141, 102, 255, 242, 62, 90, 184,
+        39, 179, 61, 229, 42, 43, 60, 236, 180, 17, 81, 0, 19, 40, 237, 9, 31, 190, 96, 11, 35, 242, 31,
+        191, 50, 123, 176, 19, 168, 38, 117, 144, 128, 85, 72, 55, 123, 175, 222, 187, 108, 70, 122, 249,
+        95, 86, 175, 58, 231];
     pub fn decode(&self, flash: &Flc, target: Integer, timestamp: u64) -> U512 {
         let forward = self.decode_side(flash, timestamp, FORWARD);
         let backward = self.decode_side(flash, !timestamp, BACKWARD); // Technically passing in 2^64 - timestamp
