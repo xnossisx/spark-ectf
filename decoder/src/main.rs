@@ -179,7 +179,6 @@ fn load_subscription(flash: &hal::flc::Flc, channel_pos: usize) -> Option<Subscr
 
         let init = (*cache.as_ptr())[20]; // Should always be non-zero if it's loaded right
         if init == 0 || init == 0xFF {
-            write_console(format!("subscription not initialized: {}", channel_pos).into_bytes().as_slice());
             return None;
         }
 
