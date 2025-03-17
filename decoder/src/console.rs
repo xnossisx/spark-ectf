@@ -2,7 +2,7 @@ use crate::{get_loc_for_channel, Integer, SUB_SPACE};
 use crate::pac::Uart0;
 use crate::subscription::{get_subscriptions, Subscription};
 use crate::{flash, load_subscription, SUB_LOC};
-use alloc::alloc::alloc;
+use alloc::alloc::{alloc, dealloc};
 use alloc::format;
 use alloc::string::ToString;
 use core::alloc::Layout;
@@ -163,6 +163,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                     ret[i*20usize+16..i*20usize+24].copy_from_slice(bytemuck::bytes_of(&(subscriptions[i].end)));
                 }
                 write_comm(ret,b'L');
+                dealloc(ret.as_mut_ptr(), l);
                 return;
             } else {
                 write_err(b"Alloc error");
@@ -218,7 +219,9 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                     return;
                 }
                 // Allocates space for the bytes
+                write_console(b"post-bonjour");
                 let byte_list: &mut [u8] = core::slice::from_raw_parts_mut(alloc(layout), length as usize);
+                write_console(b"post-post-bonjour");
                 ack();
                 // Receives bytes
                 for _ in 0..((length + 255) >> 8) {
@@ -231,8 +234,8 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                 // Splits up the data
                 let channel: u32 = u32::from_be_bytes(*&byte_list[0..4].try_into().unwrap());
                 let timestamp: u64 = u64::from_be_bytes(*&byte_list[4..12].try_into().unwrap());
-                let frame: Integer = <crate::Integer>::from_be_slice(&byte_list[12..76]); // 64 bytes
-                let signature: Signature = Signature::from_slice(&byte_list[76..140]).unwrap();
+                let frame: Integer = <crate::Integer>::from_be_slice(&byte_list[76..140]); // 64 bytes
+                let signature: Signature = Signature::from_slice(&byte_list[12..76]).unwrap();
                 //let checksum: u32 = u32::from_be_bytes(*&byte_list[140..144].try_into().unwrap());
 
                 // Get the relevant subscription, and use it to decode
@@ -274,6 +277,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
 
                 // Return the decoded bytes to the TV
                 write_comm(&ret,b'D');
+                dealloc(byte_list.as_mut_ptr(),layout);
 
             }
             _ => return

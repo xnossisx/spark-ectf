@@ -105,7 +105,7 @@ impl Subscription {
             }
         }
 
-        let mut compressed_enc: u128 = self.get_intermediate(&flash, closest_idx, dir);
+        let compressed_enc: u128 = self.get_intermediate(&flash, closest_idx, dir);
         let mut compressed= decrypt_intermediate(compressed_enc, self.channel);
         // The number of trailing zeros helps determine what step the intermediate is at! Perfect.
         let mut idx = INTERMEDIATE_NUM - 1;
@@ -144,16 +144,9 @@ impl Subscription {
         let forward = self.decode_side(flash, timestamp, FORWARD);
         let backward = self.decode_side(flash, !timestamp, BACKWARD); // Technically passing in 2^64 - timestamp
         let guard:U512 = forward ^ backward;
-        console::write_console(&forward.to_be_bytes());
-        console::write_console(&backward.to_be_bytes());
-
         let (product, _) = guard.split_mul(&<Integer>::from_be_bytes(Self::BIG_BYTES));
-        console::write_console(b"BIG");
-        console::write_console(&<Integer>::from_be_bytes(Self::BIG_BYTES).to_string().as_bytes());
-        console::write_console(b"Guard");
-        console::write_console(&product.to_le_bytes());
 
-        frame.bitxor(product)
+        frame ^ product
 
         // (&(&(&MontyForm::new(&target, MontyParams::new(self.n))).pow(&Integer::from(65537u32)).retrieve()).bitxor(&guard)).into()
         //U512::from(guard.log2_bits())

@@ -211,10 +211,6 @@ fn load_subscription(flash: &hal::flc::Flc, channel_pos: usize) -> Option<Subscr
             }
             subscription.backward_pos[j] = val;
         }
-        //pos += INTERMEDIATE_POS_SIZE * INTERMEDIATE_NUM;
-        //let mut modulus = (*cache.as_ptr())[pos..pos + 128].try_into().unwrap();
-        //decrypt_channel_modulus(&mut modulus, channel_pos as u32);
-
     }
     drop(cache);
     Some(subscription)

@@ -99,7 +99,7 @@ class Encoder:
         print(hex(guard))
 
         signature = eddsa.new(key=self.signer, mode='rfc8032', context=channel.to_bytes(4)).sign(SHA512.new(frame))
-
+        print(hex((guard ^ int.from_bytes(frame))))
         return struct.pack(">IQ", channel, timestamp) + signature + (guard ^ int.from_bytes(frame)).to_bytes(64)
 
 
