@@ -19,7 +19,7 @@ from Crypto.Hash import SHA512
 
 # Hashes it with Blake3
 def compress(n, section):
-    compressed = int.from_bytes(blake3(section.to_bytes(1, byteorder="big")).update(n.to_bytes(128, byteorder="big")).digest()) & (2 ** 128 - 1)
+    compressed = int.from_bytes(blake3(section.to_bytes(1, byteorder="big")).update(n.to_bytes(16, byteorder="big")).digest()) & (2 ** 128 - 1)
     return compressed
 
 
@@ -96,9 +96,11 @@ class Encoder:
         
         guard = ((forward ^ backward) * 0x5CF481FFE6F11B408D66FFF23E5AB827B33DE52A2B3CECB41151001328ED091FBE600B23F21FBF327BB013A8267590805548377BAFDEBB6C467AF95F56AF3AE7) % (2 ** 512)
 
+        print(hex(guard))
+
         signature = eddsa.new(key=self.signer, mode='rfc8032', context=channel.to_bytes(4)).sign(SHA512.new(frame))
 
-        return struct.pack("<IQ", channel, timestamp) + signature + (guard ^ int.from_bytes(frame)).to_bytes(64)
+        return struct.pack(">IQ", channel, timestamp) + signature + (guard ^ int.from_bytes(frame)).to_bytes(64)
 
 
 def main():

@@ -252,6 +252,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                 }
 
                 write_console(format!("Channel: {}\n", channel).as_bytes());
+                write_console(format!("timestamp: {}\n", timestamp).as_bytes());
 
                 let decoded = sub.unwrap().decode(flash, frame, timestamp);
 

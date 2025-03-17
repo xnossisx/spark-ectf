@@ -26,7 +26,7 @@ def wind_encoder(root, target):
         if mask & target > 0:
             result = compress(result, section)
     return result
-            
+
 def next_required_intermediate(start):
     complement = 0
     for section in range(64, -1, -1):
@@ -49,11 +49,11 @@ def get_intermediates(start, end, root):
             break
     return intermediates
 
-def pack_intermediates(intermediates: dict):
+def pack_intermediates(intermediates: dict, secret: int):
     _res = b""
     positions = sorted(intermediates.keys())
     for position in positions:
-        _res += intermediates[position].to_bytes(16, byteorder="big")
+        _res += encrypt(intermediates[position].to_bytes(16, byteorder="big"), secret)
     # Pack the remainder of the 1024 bytes
     for _ in range((64 * 16) - len(positions) * 16):
         _res += b"\x00"
@@ -71,10 +71,10 @@ def pack_inter_positions(intermediates: dict):
 
 def pack_metadata(channel: int, start: int, end: int, forward_inters: dict, backward_inters: dict):
     _res = channel.to_bytes(4, byteorder='big') + \
-        start.to_bytes(8, byteorder='big') + end.to_bytes(8, byteorder='big') + \
-    	len(forward_inters).to_bytes(1, byteorder='big') + len(backward_inters).to_bytes(1, byteorder='big') + \
-        pack_inter_positions(forward_inters) + pack_inter_positions(backward_inters)
-    
+           start.to_bytes(8, byteorder='big') + end.to_bytes(8, byteorder='big') + \
+           len(forward_inters).to_bytes(1, byteorder='big') + len(backward_inters).to_bytes(1, byteorder='big') + \
+           pack_inter_positions(forward_inters) + pack_inter_positions(backward_inters)
+
     for _ in range(1280 - len(_res)):
         _res += b"\x00"
     return _res
@@ -87,7 +87,7 @@ def encrypt(data, seed):
     return cipher.encrypt(data)
 
 def gen_subscription(
-    secrets: bytes, device_id: int, start: int, end: int, channel: int
+        secrets: bytes, device_id: int, start: int, end: int, channel: int
 ) -> bytes:
     """Generate the contents of a subscription.
 
@@ -113,7 +113,7 @@ def gen_subscription(
 
     # Pack the subscription. This will be sent to the decoder with ectf25.tv.subscribe
     return pack_metadata(channel, start, end, forward_inters, backward_inters) + \
-        encrypt(pack_intermediates(forward_inters) + pack_intermediates(backward_inters), secret)
+        pack_intermediates(forward_inters, secret) + pack_intermediates(backward_inters, secret)
 
 def parse_args():
     """Define and parse the command line arguments
