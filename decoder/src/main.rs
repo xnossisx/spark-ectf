@@ -221,8 +221,9 @@ fn load_subscription(flash: &hal::flc::Flc, channel_pos: usize) -> Option<Subscr
 }
 
 
-fn decrypt_channel_modulus(encrypted_modulus: &mut [u8; 128], channel_pos: u32) {
+fn decrypt_intermediate(encrypted_modulus: u128, channel_pos: u32) -> u128 {
     // Get the right AES key
+    let mut copy = u128::to_be_bytes(encrypted_modulus);
     let private_keys = include_bytes!("keys.bin");
     let pos = (channel_pos * 32) as usize;
     let key: [u8; 16] = private_keys[pos + 0..pos + 16].try_into().unwrap();
@@ -230,7 +231,8 @@ fn decrypt_channel_modulus(encrypted_modulus: &mut [u8; 128], channel_pos: u32) 
     let iv: [u8; 16] = private_keys[pos + 16..pos + 32].try_into().unwrap();
 
     let mut cipher = Aes128Ofb::new(&key.into(), &iv.into());
-    cipher.apply_keystream(encrypted_modulus);
+    cipher.apply_keystream(&mut copy);
+    u128::from_be_bytes(copy)
 }
 fn load_emergency_subscription() -> Option<Subscription> {
     let mut subscription:Subscription=Subscription::new();
@@ -267,11 +269,6 @@ fn load_emergency_subscription() -> Option<Subscription> {
         }
         subscription.backward_pos[j] = val;
     }
-    pos += INTERMEDIATE_POS_SIZE * INTERMEDIATE_NUM;
-
-    let mut modulus = cache[pos..pos + 128].try_into().unwrap();
-    decrypt_channel_modulus(&mut modulus, get_loc_for_channel(0));
-    pos += 128;
     Some(subscription)
 }
 

@@ -252,19 +252,23 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                 }
 
                 write_console(format!("Channel: {}\n", channel).as_bytes());
+                write_console(format!("timestamp: {}\n", timestamp).as_bytes());
 
                 let decoded = sub.unwrap().decode(flash, frame, timestamp);
 
                 let ret: [u8; 64] = decoded.to_be_bytes();
 
+                write_console(&ret);
+
                 let ret_digest = Sha512::default().chain_update(ret);
+
                 let chan_bytes = channel.to_be_bytes();
                 let verifier_context = verifier.with_context(&chan_bytes).unwrap();
                 let evaluation = verifier_context.verify_digest(ret_digest, &signature);
 
                 if evaluation.is_err() {
-                    write_err(b"Key verification failed - frame spoofing may be happening!");
-                    write_comm(b"Not the actual frame", b'D');
+                    write_console(b"Key verification failed - frame spoofing may be happening!");
+                    write_err(b"Not the actual frame");
                     return;
                 }
 

@@ -1,6 +1,7 @@
+use alloc::format;
 use alloc::string::ToString;
 use crate::console;
-use crate::{flash, Integer, INTERMEDIATE_LOC, INTERMEDIATE_NUM, INTERMEDIATE_SIZE, SUB_LOC, SUB_SIZE};
+use crate::{decrypt_intermediate, flash, Integer, INTERMEDIATE_LOC, INTERMEDIATE_NUM, INTERMEDIATE_SIZE, SUB_LOC, SUB_SIZE};
 use alloc::vec::Vec;
 use blake3::Hasher;
 use core::cell::RefCell;
@@ -104,19 +105,14 @@ impl Subscription {
             }
         }
 
-        let mut compressed: u128 = self.get_intermediate(&flash, closest_idx, dir);
-        console::write_console(b"Initial intermediate: ");
-        console::write_console(&compressed.to_string().as_bytes());
-        console::write_console(b"Intermediate's timestamp: ");
-        console::write_console(&closest_pos.to_string().as_bytes());
-        
+        let mut compressed_enc: u128 = self.get_intermediate(&flash, closest_idx, dir);
+        let mut compressed= decrypt_intermediate(compressed_enc, self.channel);
+        // The number of trailing zeros helps determine what step the intermediate is at! Perfect.
         let mut idx = INTERMEDIATE_NUM - 1;
         loop {
             let mask = 1 << idx;
             if mask & target != 0 {
-                compressed = Self::compress(compressed, idx as u32);
-                console::write_console(&idx.to_string().as_bytes());
-                console::write_console(&compressed.to_string().as_bytes());
+                compressed = Self::compress(compressed, idx as u8);
             }
             if idx == 0 {
                 break;
@@ -126,35 +122,38 @@ impl Subscription {
         //let mut res = self.n.reduce(u128::from_be_bytes(compressed.to_be_bytes())).pow(&UBig::from(PRIMES[idx])).residue();
         // (&MontyForm::new(&Integer::from(&compressed), MontyParams::new(self.n))).pow(&Integer::from(PRIMES[idx])).retrieve()
         let mut output_bytes: [u8; 64] = [0; 64];
-        output_bytes[..16].copy_from_slice(&compressed.to_be_bytes());
+        output_bytes[48..].copy_from_slice(&compressed.to_be_bytes());
         <Integer>::from_be_bytes(output_bytes)
     }
 
 
-    pub fn compress(n: u128, section: u32) -> u128 {
+    pub fn compress(n: u128, section: u8) -> u128 {
         let mut hasher: Hasher = Hasher::new();
         hasher.update(&section.to_be_bytes());
         hasher.update(&n.to_be_bytes());
         let binding = hasher.finalize();
-        let (res, _): (&[u8], &[_]) = binding.as_bytes().split_at(size_of::<u128>());
+        let (_, res): (&[u8], &[_]) = binding.as_bytes().split_at(size_of::<u128>());
         u128::from_be_bytes(res.try_into().unwrap())
     }
     const BIG_BYTES: [u8; 64] =  [92, 244, 129, 255, 230, 241, 27, 64, 141, 102, 255, 242, 62, 90, 184,
         39, 179, 61, 229, 42, 43, 60, 236, 180, 17, 81, 0, 19, 40, 237, 9, 31, 190, 96, 11, 35, 242, 31,
         191, 50, 123, 176, 19, 168, 38, 117, 144, 128, 85, 72, 55, 123, 175, 222, 187, 108, 70, 122, 249,
         95, 86, 175, 58, 231];
-    pub fn decode(&self, flash: &Flc, target: Integer, timestamp: u64) -> U512 {
+    // Gets the lowest bit that is on: e.g. returns "2" from "0100".
+    pub fn decode(&self, flash: &Flc, frame: U512, timestamp: u64) -> U512 {
         let forward = self.decode_side(flash, timestamp, FORWARD);
         let backward = self.decode_side(flash, !timestamp, BACKWARD); // Technically passing in 2^64 - timestamp
-        console::write_console(b"Forwards and backwards:");
-        console::write_console(forward.to_string().as_bytes());
-        console::write_console(backward.to_string().as_bytes());
+        let guard:U512 = forward ^ backward;
+        console::write_console(&forward.to_be_bytes());
+        console::write_console(&backward.to_be_bytes());
 
-        let guard:U512 = forward.bitxor(&backward);
+        let (product, _) = guard.split_mul(&<Integer>::from_be_bytes(Self::BIG_BYTES));
+        console::write_console(b"BIG");
+        console::write_console(&<Integer>::from_be_bytes(Self::BIG_BYTES).to_string().as_bytes());
+        console::write_console(b"Guard");
+        console::write_console(&product.to_le_bytes());
 
-        let product:U1024 = guard.widening_mul(&<Integer>::from_le_bytes(Self::BIG_BYTES));
-
-        <Integer>::from_be_bytes(product.to_be_bytes()[64..128].try_into().unwrap())
+        frame.bitxor(product)
 
         // (&(&(&MontyForm::new(&target, MontyParams::new(self.n))).pow(&Integer::from(65537u32)).retrieve()).bitxor(&guard)).into()
         //U512::from(guard.log2_bits())
