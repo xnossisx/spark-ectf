@@ -1,4 +1,4 @@
-use crate::{flash, Integer, INTERMEDIATE_LOC, INTERMEDIATE_NUM, INTERMEDIATE_SIZE, SUB_LOC, SUB_SIZE};
+use crate::{decrypt_intermediate, flash, Integer, INTERMEDIATE_LOC, INTERMEDIATE_NUM, INTERMEDIATE_SIZE, SUB_LOC, SUB_SIZE};
 use alloc::vec::Vec;
 use blake3::Hasher;
 use core::cell::RefCell;
@@ -102,7 +102,8 @@ impl Subscription {
             }
         }
 
-        let mut compressed: u128 = self.get_intermediate(&flash, closest_idx, dir);
+        let mut compressed_enc: u128 = self.get_intermediate(&flash, closest_idx, dir);
+        let mut compressed= decrypt_intermediate(compressed_enc, self.channel);
         // The number of trailing zeros helps determine what step the intermediate is at! Perfect.
          
         let mut idx = INTERMEDIATE_NUM - 1;
@@ -144,7 +145,7 @@ impl Subscription {
 
         let product:U1024 = guard.widening_mul(&<Integer>::from_le_bytes(Self::BIG_BYTES));
 
-        <Integer>::from_be_bytes(product.to_be_bytes()[64..128].try_into().unwrap())
+        <Integer>::from_be_bytes(product.to_be_bytes()[0..64].try_into().unwrap())
 
         // (&(&(&MontyForm::new(&target, MontyParams::new(self.n))).pow(&Integer::from(65537u32)).retrieve()).bitxor(&guard)).into()
         //U512::from(guard.log2_bits())
