@@ -46,7 +46,7 @@ print("Emergency subscription generated")
 # Export public ECC key
 
 curve = ECC.import_key(encoded=secrets["public"], curve_name="Ed25519")
-with open("src/public", "wb") as f:
+with open("src/public.bin", "wb") as f:
     # Dump the secrets to the file
     f.write(curve.public_key().export_key(format='raw'))
 

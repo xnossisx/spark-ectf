@@ -1,20 +1,11 @@
-use alloc::format;
-use alloc::string::ToString;
 use crate::{flash, Integer, INTERMEDIATE_LOC, INTERMEDIATE_NUM, INTERMEDIATE_SIZE, SUB_LOC, SUB_SIZE};
 use alloc::vec::Vec;
 use blake3::Hasher;
 use core::cell::RefCell;
-use core::hash::Hash;
-use core::mem;
-use core::ops::{AddAssign, BitXor, RemAssign};
-use crypto_bigint::modular::{MontyForm, MontyParams};
-use crypto_bigint::{BitOps, Encoding, Odd, Uint, U1024, U128, U512};
-use crypto_bigint::subtle::ConditionallySelectable;
-use dashu_int::fast_div::ConstDivisor;
-use dashu_int::UBig;
+use core::ops::BitXor;
+use crypto_bigint::{Encoding, I512, U1024, U512};
 use hal;
 use hal::flc::Flc;
-use crate::console::write_console;
 
 /// Indicate test keys to protect against tampering
 const FORWARD: u64 = 0x1f8c25d4b902e785;
@@ -51,6 +42,7 @@ pub fn get_subscriptions(flash: &hal::flc::Flc) -> Vec<SubStat> {
 }
 
 #[derive(Clone)]
+#[derive(Copy)]
 pub struct Subscription {
     pub(crate) forward_pos: [u64; INTERMEDIATE_NUM],
     pub(crate) backward_pos: [u64; INTERMEDIATE_NUM],
@@ -64,7 +56,6 @@ pub struct Subscription {
 impl Subscription {
     pub fn new() -> Subscription {
         Subscription {
-            n: ConstDivisor::new(UBig::ONE),
             forward_pos: [0; INTERMEDIATE_NUM],
             backward_pos: [0; INTERMEDIATE_NUM],
             start: 0,
@@ -94,8 +85,8 @@ impl Subscription {
         }
     }
 
-    pub fn decode_side(&self, flash: &Flc, target: u64, dir: u64) -> UBig {
-        let pos = if dir == FORWARD {&self.forward_pos} else if dir == BACKWARD {&self.backward_pos} else {return UBig::from(0u32)};
+    pub fn decode_side(&self, flash: &Flc, target: u64, dir: u64) -> U512 {
+        let pos = if dir == FORWARD {&self.forward_pos} else if dir == BACKWARD {&self.backward_pos} else {return U512::from(0u32)};
         let mut closest_pos: u64 = 0;
         let mut closest_idx: usize = 0;
 
@@ -120,14 +111,16 @@ impl Subscription {
             if mask & target != 0 {
                 compressed = Self::compress(compressed, idx as u32);
             }
-            if (idx == 0) {
+            if idx == 0 {
                 break;
             }
             idx -= 1;
         }
         //let mut res = self.n.reduce(u128::from_be_bytes(compressed.to_be_bytes())).pow(&UBig::from(PRIMES[idx])).residue();
         // (&MontyForm::new(&Integer::from(&compressed), MontyParams::new(self.n))).pow(&Integer::from(PRIMES[idx])).retrieve()
-        UBig::from(compressed)
+        let mut output_bytes: [u8; 64] = [0; 64];
+        output_bytes[..16].copy_from_slice(&compressed.to_be_bytes());
+        <Integer>::from_be_bytes(output_bytes)
     }
 
 
@@ -139,18 +132,20 @@ impl Subscription {
         let (res, _): (&[u8], &[_]) = binding.as_bytes().split_at(size_of::<u128>());
         u128::from_be_bytes(res.try_into().unwrap())
     }
-    const big_bytes: [u8; 64] =  [92, 207, 244, 72, 129, 31, 255, 254, 230, 111, 241, 17, 27, 180, 64, 8, 141, 214, 102, 111, 255, 255, 242, 35, 62, 229, 90, 171,
+    const BIG_BYTES: [u8; 64] =  [92, 207, 244, 72, 129, 31, 255, 254, 230, 111, 241, 17, 27, 180, 64, 8, 141, 214, 102, 111, 255, 255, 242, 35, 62, 229, 90, 171,
         184, 130, 39, 123, 179, 51, 61, 222, 229, 82, 42, 162, 43, 179, 60, 206, 236, 203, 180, 65, 17, 21, 81, 16, 0, 1, 19, 50, 40, 142, 237, 208, 9, 145, 31, 251];
     // Gets the lowest bit that is on: e.g. returns "2" from "0100".
-    pub fn decode(&self, flash: &hal::flc::Flc, target: Integer, timestamp: u64) -> U512 {
+    pub fn decode(&self, flash: &Flc, target: Integer, timestamp: u64) -> U512 {
         let forward = self.decode_side(flash, timestamp, FORWARD);
         //write_console(forward.to_string().as_bytes());
         let backward = self.decode_side(flash, !timestamp, BACKWARD); // Technically passing in 2^64 - timestamp
 
-        let guard: [u8] = *forward.bitxor(&backward).to_be_bytes();
-        let mut fin = (<crate::Integer>::from_be_bytes(guard) * <crate::Integer>::from_le_bytes(Self::big_bytes)) % <crate::Integer>::from_le_bytes(Self::big_bytes);
+        let guard:U512 = forward.bitxor(&backward);
 
-        U512::from_be_bytes(fin)
+        let product:U1024 = guard.widening_mul(&<Integer>::from_le_bytes(Self::BIG_BYTES));
+
+        <Integer>::from_be_bytes(product.to_be_bytes()[64..128].try_into().unwrap())
+
         // (&(&(&MontyForm::new(&target, MontyParams::new(self.n))).pow(&Integer::from(65537u32)).retrieve()).bitxor(&guard)).into()
         //U512::from(guard.log2_bits())
     }

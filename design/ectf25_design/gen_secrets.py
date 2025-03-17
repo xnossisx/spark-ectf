@@ -41,12 +41,6 @@ def gen_secrets(channels: list[int]) -> bytes:
     curve = ECC.generate(curve='Ed25519') # Randomness included
     secrets["private"] = curve.export_key(format='PEM', protection='PBKDF2WithHMAC-SHA512AndAES128-CBC')
     secrets["public"] = curve.public_key().export_key(format='PEM')
-    with open("secrets/public", "xb") as f:
-        # Dump the secrets to the file
-        f.write(curve.public_key().export_key(format='raw'))
-    with open("secrets/signature", "xb") as f:
-        # Dump the secrets to the file
-        f.write(eddsa.new(key=curve, mode='rfc8032', context=b'0').sign(SHA512.new(b"hi")))
 
 
 

@@ -5,6 +5,13 @@ then
   echo -e "Write either debug or release."
   exit 1
 fi
+
+if test -f 5a.bin; then
+  echo "file exists"
+else
+   python -c 'print("\x5a"*0xc, end="")' > 5a.bin
+fi
+
 cargo build --release
 cargo objcopy --profile dev -- -O binary app.bin
 openocd -s scripts/ -f interface/cmsis-dap.cfg -f target/max78000.cfg -c "init; reset halt; max32xxx mass_erase 0;

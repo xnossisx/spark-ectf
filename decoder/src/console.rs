@@ -1,7 +1,7 @@
-use crate::{get_channels, get_loc_for_channel, SUB_SPACE};
-use crate::pac::{Flc, Uart0};
+use crate::{get_loc_for_channel, Integer, SUB_SPACE};
+use crate::pac::Uart0;
 use crate::subscription::{get_subscriptions, Subscription};
-use crate::{flash, load_subscription, SUB_LOC, SUB_SIZE};
+use crate::{flash, load_subscription, SUB_LOC};
 use alloc::alloc::alloc;
 use alloc::format;
 use alloc::string::ToString;
@@ -9,26 +9,24 @@ use core::alloc::Layout;
 use core::cmp::min;
 use core::mem::MaybeUninit;
 use cortex_m::asm::nop;
-use crypto_bigint::U1024;
-use dashu_int::ops::BitTest;
-use ed25519_dalek::{DigestVerifier, Signature, Verifier, VerifyingKey};
-use hal::gcr::clocks::{Clock, PeripheralClock, SystemClockResults};
+use ed25519_dalek::{Digest, DigestVerifier, Sha512, Signature, VerifyingKey};
+use hal::gcr::clocks::{Clock, PeripheralClock};
 use hal::gcr::GcrRegisters;
 use hal::gpio::{Af1, Pin};
 use hal::uart::BuiltUartPeripheral;
 
 static MAGIC: u8 = b'%';
 
-pub(crate) type cons = BuiltUartPeripheral<Uart0, Pin<0, 0, Af1>, Pin<0, 1, Af1>, (), ()>;
+pub(crate) type Cons = BuiltUartPeripheral<Uart0, Pin<0, 0, Af1>, Pin<0, 1, Af1>, (), ()>;
 
 // Core reference to our flash (initially uninitialized)
-const CONSOLE_HANDLE: MaybeUninit<cons> = MaybeUninit::uninit();
+const CONSOLE_HANDLE: MaybeUninit<Cons> = MaybeUninit::uninit();
 
 /**
  * Gets a reference to the console
  * @output: An immutable console reference
  */
-pub fn console() -> &'static cons {
+pub fn console() -> &'static Cons {
     unsafe { CONSOLE_HANDLE.assume_init_ref() }
 }
 
@@ -47,13 +45,11 @@ pub fn init(
     tx_pin: Pin<0, 1, Af1>,
     pclk: &Clock<PeripheralClock>
 ) {
-    unsafe {
-        CONSOLE_HANDLE.write(hal::uart::UartPeripheral::uart0(uart0, reg, rx_pin, tx_pin)
-            .baud(115200)
-            .clock_pclk(pclk)
-            .parity(hal::uart::ParityBit::None)
-            .build());
-    }
+    CONSOLE_HANDLE.write(hal::uart::UartPeripheral::uart0(uart0, reg, rx_pin, tx_pin)
+        .baud(115200)
+        .clock_pclk(pclk)
+        .parity(hal::uart::ParityBit::None)
+        .build());
 }
 
 /// Sends a properly formatted debug message to the console.
@@ -139,7 +135,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
 
     // Reads and checks the validity of the opcode
     let opcode = read_byte();
-    if (opcode != b'E' && opcode != b'L' && opcode != b'S' && opcode != b'D' && opcode != b'A') {
+    if opcode != b'E' && opcode != b'L' && opcode != b'S' && opcode != b'D' && opcode != b'A' {
         write_console(b"that was not an opcode");
         write_console(&[opcode]);
         return;
@@ -195,12 +191,9 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                             ((byte_list[1] as u32) << 16) +
                             ((byte_list[2] as u32) << 8) + (byte_list[3] as u32));
                         pos = SUB_LOC as u32 + (channel * SUB_SPACE);
-                        unsafe {
-                            flash.erase_page(pos).unwrap_or_else(|test| {
-                                write_err(flash::map_err(test).as_bytes());
-                            });
-                            write_console(b"bored");
-                        }
+                        flash.erase_page(pos).unwrap_or_else(|test| {
+                            write_err(flash::map_err(test).as_bytes());
+                        });
                     } else {
                         pos += 256;
                     }
@@ -211,7 +204,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                     ack();
                 }
                 // Load subscription and send debug information
-                subscriptions[channel] = load_subscription(flash, channel as usize);
+                subscriptions[channel as usize] = load_subscription(flash, channel as usize);
                 write_comm(b"",b'S');
             }
             b'D' => {
@@ -227,7 +220,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                 let byte_list: &mut [u8] = core::slice::from_raw_parts_mut(alloc(layout), length as usize);
                 ack();
                 // Receives bytes
-                for i in 0..((length + 255) >> 8) {
+                for _ in 0..((length + 255) >> 8) {
                     for byte in &mut *byte_list {
                         *byte = read_byte();
                     }
@@ -237,8 +230,8 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                 // Splits up the data
                 let channel: u32 = u32::from_be_bytes(*&byte_list[0..4].try_into().unwrap());
                 let timestamp: u64 = u64::from_be_bytes(*&byte_list[4..12].try_into().unwrap());
-                let frame: U1024 = <crate::Integer>::from_be_slice(&byte_list[12..140]); // 128 bytes
-                let signature: Signature = Signature::from_slice(&byte_list[140..204]).unwrap();
+                let frame: Integer = <crate::Integer>::from_be_slice(&byte_list[12..76]); // 64 bytes
+                let signature: Signature = Signature::from_slice(&byte_list[76..140]).unwrap();
                 //let checksum: u32 = u32::from_be_bytes(*&byte_list[140..144].try_into().unwrap());
 
                 // Get the relevant subscription, and use it to decode
@@ -246,6 +239,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                 for sub_i in subscriptions {
                     if sub_i.is_some() && sub_i.clone().unwrap().channel == channel {
                         sub = Some(sub_i.clone().unwrap());
+                        write_console(b"done");
                         break;
                     }
                 }
@@ -261,8 +255,10 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
 
                 let ret: [u8; 64] = decoded.to_be_bytes();
 
-                let verifier_context = verifier.with_context(channel).unwrap();
-                let evaluation = verifier_context.verify_digest(ret, signature);
+                let ret_digest = Sha512::default().chain_update(ret);
+                let chan_bytes = channel.to_be_bytes();
+                let verifier_context = verifier.with_context(&chan_bytes).unwrap();
+                let evaluation = verifier_context.verify_digest(ret_digest, &signature);
 
                 if evaluation.is_err() {
                     write_err(b"Key verification failed - frame spoofing may be happening!");

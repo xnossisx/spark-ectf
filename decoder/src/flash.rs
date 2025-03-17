@@ -2,8 +2,6 @@ use core::mem::MaybeUninit;
 use core::result::Result::Err;
 use hal::flc::FlashError;
 use hal::gcr::clocks::SystemClockResults;
-use hal::pac::Peripherals;
-use crate::console::cons;
 use crate::pac::Flc;
 
 // Core reference to our flash (initially uninitialized)
@@ -23,9 +21,7 @@ pub fn flash() -> &'static hal::flc::Flc {
  * @param clks: The system clock data
  */
 pub fn init(flc: Flc, clks: SystemClockResults) -> hal::flc::Flc {
-    unsafe {
-        hal::flc::Flc::new(flc, clks.sys_clk)
-    }
+    hal::flc::Flc::new(flc, clks.sys_clk)
 }
 
 ///
@@ -40,26 +36,24 @@ pub fn read_bytes<'a>(fsh: &hal::flc::Flc, frm: u32, dst: &mut [u8], len: usize)
     if dst.len() < len {
         return Err(b"FlashError::LowSpace");
     }
-    unsafe {
         // Reads values 128 bits at a time
-        for i in 0..len / 16 {
-            // Verifies the address
-            if (dst.as_ptr() as i32) & 0b11 != 0 {
-                return Err(b"FlashError::InvalidAddress");
-            }
-            let addr_128_ptr = ((frm as usize) + i * 16) as u32;
-            // Security guarantee: We have checked the address already
-            unsafe {
-                // Collects the result and checks it for errors
-                let res = fsh.read_128(addr_128_ptr);
-                if res.is_err() {
-                    return Err(b"FlashError::ReadFailed");
-                }
-                // Assigns the result to the correct value
-                *((dst.as_ptr() as usize + i * 16) as *mut [u32; 4]) = res.unwrap();
-            }
+    for i in 0..len / 16 {
+        // Verifies the address
+        if (dst.as_ptr() as i32) & 0b11 != 0 {
+            return Err(b"FlashError::InvalidAddress");
         }
-    }
+        let addr_128_ptr = ((frm as usize) + i * 16) as u32;
+        // Security guarantee: We have checked the address already
+        unsafe {
+            // Collects the result and checks it for errors
+            let res = fsh.read_128(addr_128_ptr);
+            if res.is_err() {
+                return Err(b"FlashError::ReadFailed");
+            }
+            // Assigns the result to the correct value
+            *((dst.as_ptr() as usize + i * 16) as *mut [u32; 4]) = res.unwrap();
+        }
+        }
 
     Ok(())
 }
@@ -72,22 +66,21 @@ pub fn write_bytes<'a>(fsh: &hal::flc::Flc, dst: u32, from: &[u8], len: usize) -
     if from.len() < len {
         return Err(b"FlashError::LowSpace");
     }
-    unsafe {
-        for i in 0usize..len / 16 {
-            // For 128-bit addresses
-            if (from.as_ptr() as i32) & 0b11 != 0 {
-                return Err(b"FlashError::InvalidAddress");
-            }
-            let addr_128_ptr = ((dst as usize) + i * 16) as u32;
-            // We have checked the address already
-            unsafe {
-                // Performs write
-                let bytes: [u32; 4]  = *((from.as_ptr() as usize + i * 16) as *const [u32; 4]);
-                let res = fsh.write_128(addr_128_ptr, &bytes);
-                // Checks for errors
-                if res.is_err() {
-                    return Err(map_err(res.unwrap_err()).as_bytes());
-                }
+
+    for i in 0usize..len / 16 {
+        // For 128-bit addresses
+        if (from.as_ptr() as i32) & 0b11 != 0 {
+            return Err(b"FlashError::InvalidAddress");
+        }
+        let addr_128_ptr = ((dst as usize) + i * 16) as u32;
+        // We have checked the address already
+        unsafe {
+            // Performs write
+            let bytes: [u32; 4]  = *((from.as_ptr() as usize + i * 16) as *const [u32; 4]);
+            let res = fsh.write_128(addr_128_ptr, &bytes);
+            // Checks for errors
+            if res.is_err() {
+                return Err(map_err(res.unwrap_err()).as_bytes());
             }
         }
     }

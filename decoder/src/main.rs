@@ -3,20 +3,15 @@
 #![no_main]
 
 use alloc::format;
-use alloc::string::ToString;
 use hal::trng::Trng;
-use core::alloc::GlobalAlloc;
 use core::cell::RefCell;
 use core::panic::PanicInfo;
 use cortex_m::delay::Delay;
-use crypto_bigint::{Encoding, Int, Odd, Zero, U1024};
+use crypto_bigint::U512;
 use ed25519_dalek::{VerifyingKey};
-use dashu_int::fast_div::ConstDivisor;
-use dashu_int::UBig;
 use embedded_alloc::LlffHeap;
-use hmac_sha512;
 
-type Integer = U1024;
+type Integer = U512;
 
 type Heap = LlffHeap;
 
@@ -47,11 +42,9 @@ pub
 use hal::entry;
 use hal::flc::FlashError;
 pub use hal::pac;
-use hal::pac::cameraif::Ver;
 use ofb::cipher::{KeyIvInit, StreamCipher};
 use flash::flash;
-use crate::console::{cons, console, write_console};
-use crate::pac::aes;
+use crate::console::write_console;
 use crate::subscription::Subscription;
 // you can put a breakpoint on `rust_begin_unwind` to catch panics
 // use panic_itm as _; // logs messages over ITM; requires ITM support
@@ -93,9 +86,9 @@ fn main() -> ! {
 
     let pins = hal::gpio::Gpio2::new(p.gpio2, &mut gcr.reg).split();
 
-    let mut led_r = pins.p2_0.into_input_output();
-    let mut led_g = pins.p2_1.into_input_output();
-    let mut led_b = pins.p2_2.into_input_output();
+    let led_r = pins.p2_0.into_input_output();
+    let led_g = pins.p2_1.into_input_output();
+    let led_b = pins.p2_2.into_input_output();
 
     // Initialize the trng peripheral
     let trng = Trng::new(p.trng, &mut gcr.reg);
@@ -147,7 +140,7 @@ fn load_subscriptions(flash: &hal::flc::Flc) -> [Option<Subscription>; 9] {
 
     //let layout = Layout::from_size_align((SUB_SIZE * 8) as usize, 8).unwrap();
     //let mut forward_backward: *mut u8 = alloc(layout);
-    for i in 1usize..get_channels().len()+1 {
+    for i in 1usize..get_channels().len() {
         ret[i] = load_subscription(flash, i);
     }
     ret[0] = load_emergency_subscription();
@@ -205,7 +198,7 @@ fn load_subscription(flash: &hal::flc::Flc, channel_pos: usize) -> Option<Subscr
 
         for j in 0..64 {
             let val = u64::from_be_bytes((*cache.as_ptr())[pos + j*8 ..pos + j*8 + 8].try_into().unwrap());
-            if (val == 0 && j > 0) {
+            if val == 0 && j > 0 {
                 break;
             }
             subscription.forward_pos[j] = val;
@@ -214,16 +207,14 @@ fn load_subscription(flash: &hal::flc::Flc, channel_pos: usize) -> Option<Subscr
 
         for j in 0..64 {
             let val = u64::from_be_bytes((*cache.as_ptr())[pos + j*8 ..pos + j*8 + 8].try_into().unwrap());
-            if (val == 0 && j > 0) {
+            if val == 0 && j > 0 {
                 break;
             }
             subscription.backward_pos[j] = val;
         }
-        pos += INTERMEDIATE_POS_SIZE * INTERMEDIATE_NUM;
-        let mut modulus = (*cache.as_ptr())[pos..pos + 128].try_into().unwrap();
-        decrypt_channel_modulus(&mut modulus, channel_pos as u32);
-        subscription.n=ConstDivisor::new(UBig::from_be_bytes(&modulus));
-        pos += 128;
+        //pos += INTERMEDIATE_POS_SIZE * INTERMEDIATE_NUM;
+        //let mut modulus = (*cache.as_ptr())[pos..pos + 128].try_into().unwrap();
+        //decrypt_channel_modulus(&mut modulus, channel_pos as u32);
 
     }
     drop(cache);
@@ -263,7 +254,7 @@ fn load_emergency_subscription() -> Option<Subscription> {
     
     for j in 0..64 {
         let val = u64::from_be_bytes(cache[pos + j*8 ..pos + j*8 + 8].try_into().unwrap());
-        if (val == 0 && j > 0) {
+        if val == 0 && j > 0 {
             break;
         }
         subscription.forward_pos[j] = val;
@@ -272,7 +263,7 @@ fn load_emergency_subscription() -> Option<Subscription> {
 
     for j in 0..64 {
         let val = u64::from_be_bytes(cache[pos + j*8 ..pos + j*8 + 8].try_into().unwrap());
-        if (val == 0 && j > 0) {
+        if val == 0 && j > 0 {
             break;
         }
         subscription.backward_pos[j] = val;
@@ -281,7 +272,6 @@ fn load_emergency_subscription() -> Option<Subscription> {
 
     let mut modulus = cache[pos..pos + 128].try_into().unwrap();
     decrypt_channel_modulus(&mut modulus, get_loc_for_channel(0));
-    subscription.n=ConstDivisor::new(UBig::from_be_bytes(&modulus));
     pos += 128;
     Some(subscription)
 }
@@ -310,7 +300,7 @@ pub fn get_channels() -> [u32; 9] {
 * Loads the verification key for elliptic curve signatures
 */
 fn load_verification_key() -> VerifyingKey {
-    let bytes = include_bytes!("verification.bin");
+    let bytes = include_bytes!("public.bin");
     let attempt = VerifyingKey::from_bytes(bytes);
     if attempt .is_err() {
         console::write_err(format!("{}", attempt.err().unwrap()).as_bytes());
