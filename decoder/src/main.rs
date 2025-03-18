@@ -3,19 +3,15 @@
 #![no_main]
 
 use alloc::format;
-use alloc::string::ToString;
 use hal::trng::Trng;
-use core::alloc::GlobalAlloc;
 use core::cell::RefCell;
 use core::panic::PanicInfo;
 use cortex_m::delay::Delay;
-use crypto_bigint::{Encoding, Odd, Zero, U1024, U1280};
-use crypto_bigint::modular::{MontyForm, MontyParams};
+use crypto_bigint::U512;
+use ed25519_dalek::{VerifyingKey};
 use embedded_alloc::LlffHeap;
-use hmac_sha512;
 
-type Integer = U1024;
-type EncryptedModulus = U1280;
+type Integer = U512;
 
 type Heap = LlffHeap;
 
@@ -29,22 +25,26 @@ mod subscription;
 
 extern crate alloc;
 pub extern crate max7800x_hal as hal;
+extern crate aes as encrypt_aes;
 const SUB_SPACE: u32 = 8192; /* page length */
 const SUB_SIZE: usize = 4+2+64+64+128+8+8+1024+1024;
-/* channel # + intermediate lengths + intermediate references + modulus + start + end +
-intermediates (1024*2)*/
+const REQUIRED_MEMORY: u32 = 4 + 8 + 8 + 2 + (64 * 8 * 2);
+/* channel # + start + end + length checks + forward key indices + backward key indices */
 
 pub const INTERMEDIATE_NUM: usize = 64;
 pub const INTERMEDIATE_LOC: u32 = 1280;
 pub const INTERMEDIATE_SIZE: usize = 16;
 pub const INTERMEDIATE_POS_SIZE: usize = 8;
+
+type Aes128Ofb = ofb::Ofb<encrypt_aes::Aes128>;
 pub 
 
 use hal::entry;
-use hal::flc::FlashError;
+use hal::flc::{FlashError, FLASH_PAGE_SIZE};
 pub use hal::pac;
+use ofb::cipher::{KeyIvInit, StreamCipher};
 use flash::flash;
-use crate::console::{cons, console, write_console};
+use crate::console::write_console;
 use crate::subscription::Subscription;
 // you can put a breakpoint on `rust_begin_unwind` to catch panics
 // use panic_itm as _; // logs messages over ITM; requires ITM support
@@ -54,7 +54,7 @@ use crate::subscription::Subscription;
 /**
  * The location of all of our subscription data on the flash
 */
-pub const SUB_LOC: *const u8 = 0x1001f000 as *const u8;
+pub const SUB_LOC: *const u8 = 0x10036000 as *const u8;
 
 #[entry]
 fn main() -> ! {
@@ -86,9 +86,9 @@ fn main() -> ! {
 
     let pins = hal::gpio::Gpio2::new(p.gpio2, &mut gcr.reg).split();
 
-    let mut led_r = pins.p2_0.into_input_output();
-    let mut led_g = pins.p2_1.into_input_output();
-    let mut led_b = pins.p2_2.into_input_output();
+    let led_r = pins.p2_0.into_input_output();
+    let led_g = pins.p2_1.into_input_output();
+    let led_b = pins.p2_2.into_input_output();
 
     // Initialize the trng peripheral
     let trng = Trng::new(p.trng, &mut gcr.reg);
@@ -104,9 +104,9 @@ fn main() -> ! {
 
     // Load subscription from flash memory
     let flash = flash::init(p.flc, clks);
-    let mut subscriptions: [Subscription; 9] = load_subscriptions(&flash);
+    let mut subscriptions: [Option<Subscription>; 9] = load_subscriptions(&flash);
     
-
+    let divisor = load_verification_key();
 
     // Fundamental event loop
     loop {
@@ -115,7 +115,7 @@ fn main() -> ! {
 
         let output = test(test_val, &trng, &mut delay);
         if test_val*test_val == output {
-            console::read_resp(&flash, &mut subscriptions);
+            console::read_resp(&flash, &mut subscriptions, divisor);
         }
     }
 }
@@ -133,22 +133,19 @@ fn test(scan: u32, trng: &Trng, delay: &mut Delay) -> u32 {
  * Reads all subscriptions from the flash
  * Acts as a wrapper to load_subscription
  */
-fn load_subscriptions(flash: &hal::flc::Flc) -> [Subscription; 9] {
+fn load_subscriptions(flash: &hal::flc::Flc) -> [Option<Subscription>; 9] {
     // Page 1: Modulus, Channel, Start, End, Forward Count, Backward Count
     // Page 2: Forward exponents, Backward exponents
-    let mut ret = [Subscription::new(); 9];
+    let mut ret:[Option<Subscription>; 9] = [None; 9];
 
     //let layout = Layout::from_size_align((SUB_SIZE * 8) as usize, 8).unwrap();
     //let mut forward_backward: *mut u8 = alloc(layout);
-    for i in 0usize..8 {
-        if !load_subscription(flash, &mut ret[i], i) {
-            break;
-        }
+    for i in 1usize..get_channels().len() {
+        ret[i] = load_subscription(flash, i);
     }
-    load_emergency_subscription(&mut ret[get_loc_for_channel(0) as usize]);
+    ret[0] = load_emergency_subscription();
     ret
 }
-
 
 /**
  * Reads a subscription from the flash
@@ -158,38 +155,43 @@ fn load_subscriptions(flash: &hal::flc::Flc) -> [Subscription; 9] {
  * @param subscription: A reference to a subscription being loaded
  * @return The success of the operation
  */
-fn load_subscription(flash: &hal::flc::Flc, subscription: &mut Subscription, channel_pos: usize) -> bool {
+fn load_subscription(flash: &hal::flc::Flc, channel_pos: usize) -> Option<Subscription> {
+    let mut subscription : Subscription = Subscription::new();
     let cache: RefCell<[u8; 2048 as usize]> = RefCell::new([0; 2048 as usize]);
-    let mut pos: usize = 0;
-    let result = flash.check_address(SUB_LOC as u32 + pos as u32);
+    let mut address: usize = SUB_LOC as usize + (channel_pos * SUB_SPACE as usize);
+    let result = flash.check_address(address as u32);
     if result.is_err() {
         match result.unwrap_err() {
             FlashError::InvalidAddress => {
-                console::write_console(b"InvalidAddress\n");
+                console::write_err(b"InvalidAddress\n");
             }
             FlashError::AccessViolation => {
-                console::write_console(b"InvalidOperation\n");
+                console::write_err(b"InvalidOperation\n");
             }
             FlashError::NeedsErase => {
-                console::write_console(b"NeedsErase\n");
+                console::write_err(b"NeedsErase\n");
             }
         };
-        return false
+        return None
     }
     unsafe {
-        let _ = flash::read_bytes(flash, SUB_LOC as u32 + pos as u32, &mut (*cache.as_ptr()), SUB_SIZE);
+        let _ = flash::read_bytes(flash, address as u32, &mut (*cache.as_ptr()), REQUIRED_MEMORY as usize);
 
+        let test = &(*cache.as_ptr())[0..20];
+        console::write_console(test);
         let init = (*cache.as_ptr())[20]; // Should always be non-zero if it's loaded right
         if init == 0 || init == 0xFF {
-            return false;
+            if (init == 0) {
+                console::write_console(b"NotCleared\n");
+            }
+            return None;
         }
+        let mut pos = 0;
 
-        subscription.location = channel_pos * SUB_SIZE;
+        subscription.location = address;
         subscription.channel=u32::from_be_bytes((*cache.as_ptr())[pos..pos+4].try_into().unwrap());
         pos += 4;
 
-        let _ = u8::from_be_bytes((*cache.as_ptr())[pos..pos+1].try_into().unwrap());
-        let _ = u8::from_be_bytes((*cache.as_ptr())[pos+1..pos+2].try_into().unwrap());
         subscription.start=u64::from_be_bytes((*cache.as_ptr())[pos..pos+8].try_into().unwrap());
         pos += 8;
         subscription.end=u64::from_be_bytes((*cache.as_ptr())[pos..pos+8].try_into().unwrap());
@@ -199,7 +201,7 @@ fn load_subscription(flash: &hal::flc::Flc, subscription: &mut Subscription, cha
 
         for j in 0..64 {
             let val = u64::from_be_bytes((*cache.as_ptr())[pos + j*8 ..pos + j*8 + 8].try_into().unwrap());
-            if (val == 0 && j > 0) {
+            if val == 0 && j > 0 {
                 break;
             }
             subscription.forward_pos[j] = val;
@@ -208,43 +210,38 @@ fn load_subscription(flash: &hal::flc::Flc, subscription: &mut Subscription, cha
 
         for j in 0..64 {
             let val = u64::from_be_bytes((*cache.as_ptr())[pos + j*8 ..pos + j*8 + 8].try_into().unwrap());
-            if (val == 0 && j > 0) {
+            if val == 0 && j > 0 {
                 break;
             }
             subscription.backward_pos[j] = val;
         }
-        pos += INTERMEDIATE_POS_SIZE * INTERMEDIATE_NUM;
-        let encrypted_modulus = EncryptedModulus::from_be_bytes((*cache.as_ptr())[pos ..pos + 160].try_into().unwrap());
-        subscription.n=Odd::<Integer>::new(decrypt_channel_modulus(encrypted_modulus, channel_pos as u32)).unwrap();
-        pos += 160;
-
     }
-
-    true
+    drop(cache);
+    Some(subscription)
 }
 
 
-fn decrypt_channel_modulus(encrypted_modulus: EncryptedModulus, channel_pos: u32) -> Integer {
-    // Choose the resulting 160-byte integer from moduli
-    let moduli = include_bytes!("moduli.bin");
-    let pos = (channel_pos * 160) as usize;
-    let modulus = Odd::<EncryptedModulus>::new(EncryptedModulus::from_be_bytes(*&moduli[pos..pos+160].try_into().unwrap())).unwrap();
+fn decrypt_intermediate(encrypted_modulus: u128, channel_pos: u32) -> u128 {
+    // Get the right AES key
+    let mut copy = u128::to_be_bytes(encrypted_modulus);
+    let private_keys = include_bytes!("keys.bin");
+    let pos = (channel_pos * 32) as usize;
+    let key: [u8; 16] = private_keys[pos + 0..pos + 16].try_into().unwrap();
 
-    // And the same from the private keys
-    let private_keys = include_bytes!("privates.bin");
-    let pos = (channel_pos * 160) as usize;
-    let private_key = EncryptedModulus::from_be_bytes(*&private_keys[pos..pos + 160].try_into().unwrap());
-    //write_console(private_key.to_string().as_bytes());
+    let iv: [u8; 16] = private_keys[pos + 16..pos + 32].try_into().unwrap();
 
-    (&MontyForm::new(&encrypted_modulus, MontyParams::new_vartime(modulus)).pow(&private_key).retrieve()).into()
+    let mut cipher = Aes128Ofb::new(&key.into(), &iv.into());
+    cipher.apply_keystream(&mut copy);
+    u128::from_be_bytes(copy)
 }
-fn load_emergency_subscription(subscription: &mut Subscription) {
+fn load_emergency_subscription() -> Option<Subscription> {
+    let mut subscription:Subscription=Subscription::new();
     let cache = include_bytes!("emergency.bin");
     let mut pos = 0;
     subscription.location = 0; // Done as a special case
     subscription.channel = u32::from_be_bytes(cache[pos..pos+4].try_into().unwrap());
     if subscription.channel != 0 {
-        return
+        return None;
     }
     pos += 4;
     subscription.start=u64::from_be_bytes(cache[pos..pos+8].try_into().unwrap());
@@ -258,7 +255,7 @@ fn load_emergency_subscription(subscription: &mut Subscription) {
     
     for j in 0..64 {
         let val = u64::from_be_bytes(cache[pos + j*8 ..pos + j*8 + 8].try_into().unwrap());
-        if (val == 0 && j > 0) {
+        if val == 0 && j > 0 {
             break;
         }
         subscription.forward_pos[j] = val;
@@ -267,19 +264,12 @@ fn load_emergency_subscription(subscription: &mut Subscription) {
 
     for j in 0..64 {
         let val = u64::from_be_bytes(cache[pos + j*8 ..pos + j*8 + 8].try_into().unwrap());
-        if (val == 0 && j > 0) {
+        if val == 0 && j > 0 {
             break;
         }
         subscription.backward_pos[j] = val;
     }
-    pos += INTERMEDIATE_POS_SIZE * INTERMEDIATE_NUM;
-
-    let encrypted_modulus = EncryptedModulus::from_be_bytes(cache[pos..pos + 160].try_into().unwrap());
-    write_console(get_loc_for_channel(0).to_string().as_bytes());
-
-    subscription.n=Odd::<Integer>::new(decrypt_channel_modulus(encrypted_modulus, get_loc_for_channel(0))).unwrap();
-    write_console(subscription.n.to_string().as_bytes());
-    pos += 160;
+    Some(subscription)
 }
 
 /**
@@ -303,12 +293,23 @@ pub fn get_channels() -> [u32; 9] {
 }
 
 /**
+* Loads the verification key for elliptic curve signatures
+*/
+fn load_verification_key() -> VerifyingKey {
+    let bytes = include_bytes!("public.bin");
+    let attempt = VerifyingKey::from_bytes(bytes);
+    if attempt .is_err() {
+        console::write_err(format!("{}", attempt.err().unwrap()).as_bytes());
+        panic!();
+    }
+    attempt.unwrap()
+}
+/**
 * @input The channel ID
 * @output The location of the channel in the actual channel list in flash
 */
 fn get_loc_for_channel(channel: u32) -> u32 {
     let channels = get_channels();
-    write_console(format!("{:?}", channels).as_bytes());
     for i in 0..channels.len() {
         if channels[i] == channel {
             return i as u32;

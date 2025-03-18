@@ -9,8 +9,9 @@ from pathlib import Path
 
 from loguru import logger
 import rsa
-
-
+from Crypto.PublicKey import ECC
+from Crypto.Signature import eddsa
+from Crypto.Hash import SHA512
 def gen_secrets(channels: list[int]) -> bytes:
     """Generate the contents secrets file
 
@@ -36,15 +37,16 @@ def gen_secrets(channels: list[int]) -> bytes:
 
 
     secrets["systemsecret"] = rsa.randnum.read_random_int(64)
+    # For frame encoding
+    curve = ECC.generate(curve='Ed25519') # Randomness included
+    secrets["private"] = curve.export_key(format='PEM', protection='PBKDF2WithHMAC-SHA512AndAES128-CBC')
+    secrets["public"] = curve.public_key().export_key(format='PEM')
+
+
+
     for channel in channels:
         secrets[channel] = {}
 
-        # For frame encoding
-        (public, private) = rsa.newkeys(1024)
-        secrets[channel]["modulus"] = public.n
-        secrets[channel]["p"] = private.p
-        secrets[channel]["q"] = private.q
-        secrets[channel]["d"] = private.d
 
         secrets[channel]["forward"] = rsa.randnum.read_random_int(128)
         secrets[channel]["backward"] = rsa.randnum.read_random_int(128)

@@ -1,17 +1,14 @@
 use alloc::format;
 use alloc::string::ToString;
-use crate::{flash, Integer, INTERMEDIATE_LOC, INTERMEDIATE_NUM, INTERMEDIATE_SIZE, SUB_LOC, SUB_SIZE};
+use crate::console;
+use crate::{decrypt_intermediate, flash, Integer, INTERMEDIATE_LOC, INTERMEDIATE_NUM, INTERMEDIATE_SIZE, SUB_LOC, SUB_SIZE};
 use alloc::vec::Vec;
 use blake3::Hasher;
 use core::cell::RefCell;
-use core::hash::Hash;
-use core::mem;
-use crypto_bigint::modular::{MontyForm, MontyParams};
-use crypto_bigint::{Encoding, Odd, U1024, U128, U512};
-use crypto_bigint::subtle::ConditionallySelectable;
+use core::ops::BitXor;
+use crypto_bigint::{Encoding, I512, U1024, U512};
 use hal;
-use hal::flc::Flc;
-use crate::console::write_console;
+use hal::flc::{Flc, FLASH_PAGE_SIZE};
 
 /// Indicate test keys to protect against tampering
 const FORWARD: u64 = 0x1f8c25d4b902e785;
@@ -35,23 +32,25 @@ pub struct SubStat {
 pub fn get_subscriptions(flash: &hal::flc::Flc) -> Vec<SubStat> {
     let mut ret: Vec<SubStat> = Vec::new();
     for i in 0usize..8 {
-        let mut data: [u8; 22] = [0;22];
-        let _res = flash::read_bytes(flash, (SUB_LOC as u32) + (i as u32) * (SUB_SIZE as u32), &mut data, 22);
-        if (data[0] == 0) || (data[0] == 0xff) { continue; }
-        ret.push(SubStat{
-            exists: (data[0] != 0 && data[0] != 0xff),
+        let mut data: [u8; 22] = [0; 22];
+
+        let _res = flash::read_bytes(flash, (SUB_LOC as u32) + (i as u32) * FLASH_PAGE_SIZE, &mut data, 22);
+        console::write_console(&data);
+        if (data[20] == 0) || (data[20] == 0xff) { continue; }
+        ret.push(SubStat {
+            exists: data[20] != 0 && data[20] != 0xff,
             channel: u32::from_be_bytes(data[0..4].split_at(size_of::<u32>()).0.try_into().unwrap()),
-            start: u64::from_be_bytes(data[6..14].split_at(size_of::<u64>()).0.try_into().unwrap()),
-            end: u64::from_be_bytes(data[14..22].split_at(size_of::<u64>()).0.try_into().unwrap())});
+            start: u64::from_be_bytes(data[4..12].split_at(size_of::<u64>()).0.try_into().unwrap()),
+            end: u64::from_be_bytes(data[12..20].split_at(size_of::<u64>()).0.try_into().unwrap())
+        });
+        console::write_console(b"done");
     }
     ret
 }
 
-
-#[derive(Copy)]
 #[derive(Clone)]
+#[derive(Copy)]
 pub struct Subscription {
-    pub(crate) n: Odd<Integer>,
     pub(crate) forward_pos: [u64; INTERMEDIATE_NUM],
     pub(crate) backward_pos: [u64; INTERMEDIATE_NUM],
     pub(crate) start: u64,
@@ -64,7 +63,6 @@ pub struct Subscription {
 impl Subscription {
     pub fn new() -> Subscription {
         Subscription {
-            n: Odd::new(Integer::ONE).unwrap(),
             forward_pos: [0; INTERMEDIATE_NUM],
             backward_pos: [0; INTERMEDIATE_NUM],
             start: 0,
@@ -75,11 +73,11 @@ impl Subscription {
         }
     }
 
-    pub fn get_intermediate(&self, flash: &hal::flc::Flc, pos: usize, dir: u64) -> U128 {
+    pub fn get_intermediate(&self, flash: &hal::flc::Flc, pos: usize, dir: u64) -> u128 {
         if self.location == 0 { // Emergency channel
             let sub_bytes = include_bytes!("emergency.bin");
             let intermediate_pos = INTERMEDIATE_LOC as usize + pos * INTERMEDIATE_SIZE + if dir == FORWARD {0} else {1024};
-            return U128::from_be_bytes(sub_bytes[intermediate_pos..intermediate_pos+16].try_into().unwrap());
+            return u128::from_be_bytes(sub_bytes[intermediate_pos..intermediate_pos+16].try_into().unwrap());
         }
         
         let ref_location = if dir == FORWARD
@@ -90,12 +88,12 @@ impl Subscription {
         let intermediate_buffer: RefCell<[u8; INTERMEDIATE_SIZE]> = RefCell::new([0; INTERMEDIATE_SIZE]);
         unsafe {
             let _ = flash::read_bytes(flash, ref_location, &mut (*intermediate_buffer.as_ptr())[0..INTERMEDIATE_SIZE], INTERMEDIATE_SIZE);
-            U128::from_be_bytes((*intermediate_buffer.as_ptr()).try_into().unwrap())
+            u128::from_be_bytes((*intermediate_buffer.as_ptr()).try_into().unwrap())
         }
     }
 
-    pub fn decode_side(&self, flash: &Flc, target: u64, dir: u64) -> Integer {
-        let pos = if dir == FORWARD {&self.forward_pos} else if dir == BACKWARD {&self.backward_pos} else {return Integer::ZERO};
+    pub fn decode_side(&self, flash: &Flc, target: u64, dir: u64) -> U512 {
+        let pos = if dir == FORWARD {&self.forward_pos} else if dir == BACKWARD {&self.backward_pos} else {return U512::from(0u32)};
         let mut closest_pos: u64 = 0;
         let mut closest_idx: usize = 0;
 
@@ -111,53 +109,51 @@ impl Subscription {
             }
         }
 
-        write_console(format!("closest pos: {}\n", closest_pos).as_bytes());
-        let intermediate: U128 = self.get_intermediate(&flash, closest_idx, dir);
+        let compressed_enc: u128 = self.get_intermediate(&flash, closest_idx, dir);
+        let mut compressed= decrypt_intermediate(compressed_enc, self.channel);
         // The number of trailing zeros helps determine what step the intermediate is at! Perfect.
-        let params = MontyParams::new(self.n);
-        let mut monty = MontyForm::new(&Integer::from(PRIMES[trailing_zeroes_special(target)]), params).pow(&intermediate);
-        let mut result: Integer = monty.retrieve();
-        // Takes the result to be the top exponent of a power tower of primes
-        write_console(b"expanded\n");
-
-        let mut base: U1024 = U1024::ONE;
-                
         let mut idx = INTERMEDIATE_NUM - 1;
         loop {
             let mask = 1 << idx;
             if mask & target != 0 {
-                base = PRIMES[idx].try_into().unwrap();
-                //base = U1024::from(PRIMES[idx]);
-                monty = MontyForm::new(&base, params).pow(&(Self::compress(result, idx as u32)));
-                result = monty.retrieve();
+                compressed = Self::compress(compressed, idx as u8);
             }
-            if (idx == 0) {
+            if idx == 0 {
                 break;
             }
             idx -= 1;
         }
-        result
+        //let mut res = self.n.reduce(u128::from_be_bytes(compressed.to_be_bytes())).pow(&UBig::from(PRIMES[idx])).residue();
+        // (&MontyForm::new(&Integer::from(&compressed), MontyParams::new(self.n))).pow(&Integer::from(PRIMES[idx])).retrieve()
+        let mut output_bytes: [u8; 64] = [0; 64];
+        output_bytes[48..].copy_from_slice(&compressed.to_be_bytes());
+        <Integer>::from_be_bytes(output_bytes)
     }
 
 
-    pub fn compress(n: Integer, section: u32) -> U128 {
-        let mut hasher: Hasher = blake3::Hasher::new();
+    pub fn compress(n: u128, section: u8) -> u128 {
+        let mut hasher: Hasher = Hasher::new();
         hasher.update(&section.to_be_bytes());
         hasher.update(&n.to_be_bytes());
         let binding = hasher.finalize();
-        let (res, _): (&[u8], &[_]) = binding.as_bytes().split_at(size_of::<U128>());
-        U128::from_be_bytes(res.try_into().unwrap())
+        let (_, res): (&[u8], &[_]) = binding.as_bytes().split_at(size_of::<u128>());
+        u128::from_be_bytes(res.try_into().unwrap())
     }
-
+    const BIG_BYTES: [u8; 64] =  [92, 244, 129, 255, 230, 241, 27, 64, 141, 102, 255, 242, 62, 90, 184,
+        39, 179, 61, 229, 42, 43, 60, 236, 180, 17, 81, 0, 19, 40, 237, 9, 31, 190, 96, 11, 35, 242, 31,
+        191, 50, 123, 176, 19, 168, 38, 117, 144, 128, 85, 72, 55, 123, 175, 222, 187, 108, 70, 122, 249,
+        95, 86, 175, 58, 231];
     // Gets the lowest bit that is on: e.g. returns "2" from "0100".
-    pub fn decode(&self, flash: &hal::flc::Flc, target: Integer, timestamp: u64) -> U512 {
+    pub fn decode(&self, flash: &Flc, frame: U512, timestamp: u64) -> U512 {
         let forward = self.decode_side(flash, timestamp, FORWARD);
-        write_console(forward.to_string().as_bytes());
         let backward = self.decode_side(flash, !timestamp, BACKWARD); // Technically passing in 2^64 - timestamp
-        write_console(backward.to_string().as_bytes());
+        let guard:U512 = forward ^ backward;
+        let (product, _) = guard.split_mul(&<Integer>::from_be_bytes(Self::BIG_BYTES));
 
-        let guard = forward.bitxor(&backward);
-        (&(&(&MontyForm::new(&target, MontyParams::new(self.n))).pow(&Integer::from(65537u32)).retrieve()).bitxor(&guard)).into()
+        frame ^ product
+
+        // (&(&(&MontyForm::new(&target, MontyParams::new(self.n))).pow(&Integer::from(65537u32)).retrieve()).bitxor(&guard)).into()
+        //U512::from(guard.log2_bits())
     }
 }
 pub fn trailing_zeroes_special(target: u64) -> usize {
