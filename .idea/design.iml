@@ -12,14 +12,12 @@
       <sourceFolder url="file://$MODULE_DIR$/decoder/examples" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/decoder/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/spark-ectf/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/.vscode" />
       <excludeFolder url="file://$MODULE_DIR$/spark-decoder/.idea/shelf" />
       <excludeFolder url="file://$MODULE_DIR$/spark-decoder/.vscode" />
       <excludeFolder url="file://$MODULE_DIR$/spark-decoder/target" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
       <excludeFolder url="file://$MODULE_DIR$/decoder/target" />
-      <excludeFolder url="file://$MODULE_DIR$/spark-ectf/target" />
     </content>
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />
