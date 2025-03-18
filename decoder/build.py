@@ -32,20 +32,23 @@ keys = [get_key_iv((secret << 64) + (decoder_id << 32) + channel) for channel in
 print("Keys generated")
 
 # Export the keys to a file
-os.remove("src/keys.bin")
+if os.path.exists("/decoder/src/keys.bin"):
+    os.remove("/decoder/src/keys.bin")
 open("src/keys.bin", "xb+").write(b"".join(keys))
 
 # Generate the channel 0 subscription
 sub = gen_subscription.gen_subscription(secretsfile, decoder_id, 0, 2**64 - 1, 0)
-os.remove("src/emergency.bin")
-open("src/emergency.bin", "xb+").write(gen_subscription.gen_subscription(secretsfile, decoder_id, 0, 2**64 - 1, 0))
+if os.path.exists("/decoder/src/emergency.bin"):
+    os.remove("/decoder/src/emergency.bin")
+open("/decoder/src/emergency.bin", "xb+").write(gen_subscription.gen_subscription(secretsfile, decoder_id, 0, 2**64 - 1, 0))
 print("Emergency subscription generated")
 
 # Export public ECC key
 
 curve = ECC.import_key(encoded=secrets["public"], curve_name="Ed25519")
-os.remove("src/public.bin")
-with open("src/public.bin", "xb+") as f:
+if os.path.exists("/decoder/src/public.bin"):
+    os.remove("/decoder/src/public.bin")
+with open("/decoder/src/public.bin", "xb+") as f:
     # Dump the secrets to the file
     f.write(curve.public_key().export_key(format='raw'))
 
