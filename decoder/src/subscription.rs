@@ -8,7 +8,7 @@ use core::cell::RefCell;
 use core::ops::BitXor;
 use crypto_bigint::{Encoding, I512, U1024, U512};
 use hal;
-use hal::flc::Flc;
+use hal::flc::{Flc, FLASH_PAGE_SIZE};
 
 /// Indicate test keys to protect against tampering
 const FORWARD: u64 = 0x1f8c25d4b902e785;
@@ -32,14 +32,18 @@ pub struct SubStat {
 pub fn get_subscriptions(flash: &hal::flc::Flc) -> Vec<SubStat> {
     let mut ret: Vec<SubStat> = Vec::new();
     for i in 0usize..8 {
-        let mut data: [u8; 22] = [0;22];
-        let _res = flash::read_bytes(flash, (SUB_LOC as u32) + (i as u32) * (SUB_SIZE as u32), &mut data, 22);
-        if (data[0] == 0) || (data[0] == 0xff) { continue; }
-        ret.push(SubStat{
-            exists: (data[0] != 0 && data[0] != 0xff),
+        let mut data: [u8; 22] = [0; 22];
+
+        let _res = flash::read_bytes(flash, (SUB_LOC as u32) + (i as u32) * FLASH_PAGE_SIZE, &mut data, 22);
+        console::write_console(&data);
+        if (data[20] == 0) || (data[20] == 0xff) { continue; }
+        ret.push(SubStat {
+            exists: data[20] != 0 && data[20] != 0xff,
             channel: u32::from_be_bytes(data[0..4].split_at(size_of::<u32>()).0.try_into().unwrap()),
-            start: u64::from_be_bytes(data[6..14].split_at(size_of::<u64>()).0.try_into().unwrap()),
-            end: u64::from_be_bytes(data[14..22].split_at(size_of::<u64>()).0.try_into().unwrap())});
+            start: u64::from_be_bytes(data[4..12].split_at(size_of::<u64>()).0.try_into().unwrap()),
+            end: u64::from_be_bytes(data[12..20].split_at(size_of::<u64>()).0.try_into().unwrap())
+        });
+        console::write_console(b"done");
     }
     ret
 }

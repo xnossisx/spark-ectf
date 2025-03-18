@@ -28,8 +28,8 @@ pub extern crate max7800x_hal as hal;
 extern crate aes as encrypt_aes;
 const SUB_SPACE: u32 = 8192; /* page length */
 const SUB_SIZE: usize = 4+2+64+64+128+8+8+1024+1024;
-/* channel # + intermediate lengths + intermediate references + modulus + start + end +
-intermediates (1024*2)*/
+const REQUIRED_MEMORY: u32 = 4 + 8 + 8 + 2 + (64 * 8 * 2);
+/* channel # + start + end + length checks + forward key indices + backward key indices */
 
 pub const INTERMEDIATE_NUM: usize = 64;
 pub const INTERMEDIATE_LOC: u32 = 1280;
@@ -40,7 +40,7 @@ type Aes128Ofb = ofb::Ofb<encrypt_aes::Aes128>;
 pub 
 
 use hal::entry;
-use hal::flc::FlashError;
+use hal::flc::{FlashError, FLASH_PAGE_SIZE};
 pub use hal::pac;
 use ofb::cipher::{KeyIvInit, StreamCipher};
 use flash::flash;
@@ -54,7 +54,7 @@ use crate::subscription::Subscription;
 /**
  * The location of all of our subscription data on the flash
 */
-pub const SUB_LOC: *const u8 = 0x10022000 as *const u8;
+pub const SUB_LOC: *const u8 = 0x10036000 as *const u8;
 
 #[entry]
 fn main() -> ! {
@@ -156,38 +156,42 @@ fn load_subscriptions(flash: &hal::flc::Flc) -> [Option<Subscription>; 9] {
  * @return The success of the operation
  */
 fn load_subscription(flash: &hal::flc::Flc, channel_pos: usize) -> Option<Subscription> {
-    let mut subscription:Subscription=Subscription::new();
+    let mut subscription : Subscription = Subscription::new();
     let cache: RefCell<[u8; 2048 as usize]> = RefCell::new([0; 2048 as usize]);
-    let mut pos: usize = 0;
-    let result = flash.check_address(SUB_LOC as u32 + pos as u32);
+    let mut address: usize = SUB_LOC as usize + (channel_pos * SUB_SPACE as usize);
+    let result = flash.check_address(address as u32);
     if result.is_err() {
         match result.unwrap_err() {
             FlashError::InvalidAddress => {
-                console::write_console(b"InvalidAddress\n");
+                console::write_err(b"InvalidAddress\n");
             }
             FlashError::AccessViolation => {
-                console::write_console(b"InvalidOperation\n");
+                console::write_err(b"InvalidOperation\n");
             }
             FlashError::NeedsErase => {
-                console::write_console(b"NeedsErase\n");
+                console::write_err(b"NeedsErase\n");
             }
         };
         return None
     }
     unsafe {
-        let _ = flash::read_bytes(flash, SUB_LOC as u32 + pos as u32, &mut (*cache.as_ptr()), SUB_SIZE);
+        let _ = flash::read_bytes(flash, address as u32, &mut (*cache.as_ptr()), REQUIRED_MEMORY as usize);
 
+        let test = &(*cache.as_ptr())[0..20];
+        console::write_console(test);
         let init = (*cache.as_ptr())[20]; // Should always be non-zero if it's loaded right
         if init == 0 || init == 0xFF {
+            if (init == 0) {
+                console::write_console(b"NotCleared\n");
+            }
             return None;
         }
+        let mut pos = 0;
 
-        subscription.location = channel_pos * SUB_SIZE;
+        subscription.location = address;
         subscription.channel=u32::from_be_bytes((*cache.as_ptr())[pos..pos+4].try_into().unwrap());
         pos += 4;
 
-        let _ = u8::from_be_bytes((*cache.as_ptr())[pos..pos+1].try_into().unwrap());
-        let _ = u8::from_be_bytes((*cache.as_ptr())[pos+1..pos+2].try_into().unwrap());
         subscription.start=u64::from_be_bytes((*cache.as_ptr())[pos..pos+8].try_into().unwrap());
         pos += 8;
         subscription.end=u64::from_be_bytes((*cache.as_ptr())[pos..pos+8].try_into().unwrap());

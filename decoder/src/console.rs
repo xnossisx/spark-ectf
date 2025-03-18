@@ -147,6 +147,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
     write_console(b"bonjour");
     unsafe {
         if opcode == b'L' {
+            ack();
             // Responds to the list command by getting the subscriptions...
             let subscriptions = get_subscriptions(flash);
             if let Ok(l) = Layout::from_size_align(4usize + subscriptions.len()*20usize, 16) {
@@ -188,10 +189,12 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                     }
 
                     if i == 0 {
-                        // Casts the first 4 bytes to the channel value
-                        channel = get_loc_for_channel(((byte_list[0] as u32) << 24) +
+                        let channel_id = ((byte_list[0] as u32) << 24) +
                             ((byte_list[1] as u32) << 16) +
-                            ((byte_list[2] as u32) << 8) + (byte_list[3] as u32));
+                            ((byte_list[2] as u32) << 8) + (byte_list[3] as u32);
+                        // Casts the first 4 bytes to the channel value
+                        channel = get_loc_for_channel(channel_id);
+
                         pos = SUB_LOC as u32 + (channel * SUB_SPACE);
                         flash.erase_page(pos).unwrap_or_else(|test| {
                             write_err(flash::map_err(test).as_bytes());
@@ -200,13 +203,34 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                         pos += 256;
                     }
                     // Writes data to the flash
-                    flash::write_bytes(flash, pos, &byte_list, 256).unwrap_or_else(|test| {
-                        write_err(test);
+                    flash::write_bytes(flash, pos, &byte_list, 256).unwrap_or_else(|err| {
+                        write_err(err);
                     });
+                    if i == 0 {
+
+                    }
                     ack();
                 }
+                // Test to see if it was actually written
+                let dst = &mut [0; 256];
+                let test = flash::read_bytes(flash, SUB_LOC as u32 + (channel * SUB_SPACE), dst, 256);
+                if test.is_err() {
+                    write_err(test.unwrap_err());
+                }
+                write_console(dst);
+                
                 // Load subscription and send debug information
+                write_console(b"written");
+
                 subscriptions[channel as usize] = load_subscription(flash, channel as usize);
+                write_console(b"living");
+
+                if subscriptions[channel as usize].is_none() {
+                    write_console(b"Failed to load subscription");
+                } else {
+                    write_console(b"Success");
+                }
+                
                 write_comm(b"",b'S');
             }
             b'D' => {
@@ -219,9 +243,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                     return;
                 }
                 // Allocates space for the bytes
-                write_console(b"post-bonjour");
                 let byte_list: &mut [u8] = core::slice::from_raw_parts_mut(alloc(layout), length as usize);
-                write_console(b"post-post-bonjour");
                 ack();
                 // Receives bytes
                 for _ in 0..((length + 255) >> 8) {
