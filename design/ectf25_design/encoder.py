@@ -9,8 +9,7 @@ Date: 2025
 import argparse
 import struct
 import json
-import gmpy2
-from sympy import isprime
+
 import time
 from blake3 import blake3
 from Crypto.PublicKey import ECC
