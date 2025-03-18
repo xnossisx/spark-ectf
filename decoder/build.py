@@ -20,7 +20,7 @@ from Crypto.Hash import SHA512
 decoder_id = int(os.getenv("DECODER_ID"), base=0)
 
 # Generate a seed for each channel; you need a secret from secrets/secrets.json
-secretsfile = open("/secrets/secrets.json").read()
+secretsfile = open("/global.secrets").read()
 secrets = json.loads(secretsfile)
 secret = secrets["systemsecret"]
 channels = secrets["channels"]

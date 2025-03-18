@@ -46,4 +46,4 @@ CMD ["python3", "build.py"]
 
 # Sample run command:
 # docker build -t build-decoder ./decoder (if changes have been made)
-# docker run --rm -v ./build_out:/out -v ./decoder:/decoder -v ./secrets:/secrets -e DECODER_ID=0xdeadbeef build-decoder
+# docker run --rm -v ./build_out:/out -v ./decoder:/decoder -v ./global.secrets:/global.secrets -e DECODER_ID=0xdeadbeef build-decoder
