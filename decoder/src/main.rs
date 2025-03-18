@@ -1,4 +1,3 @@
-#![feature(concat_bytes)]
 #![no_std]
 #![no_main]
 
@@ -219,7 +218,6 @@ fn load_subscription(flash: &hal::flc::Flc, channel_pos: usize) -> Option<Subscr
     drop(cache);
     Some(subscription)
 }
-
 
 fn decrypt_intermediate(encrypted_modulus: u128, channel_pos: u32) -> u128 {
     // Get the right AES key
