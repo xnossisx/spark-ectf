@@ -13,7 +13,7 @@ dependencies = [
     "rsa",
     "pathlib",
     "blake3",
-    "Crypto"
+    "pycryptodome"
 ]
 
 [tool.black]
