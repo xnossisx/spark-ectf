@@ -7,7 +7,6 @@ import argparse
 import json
 from pathlib import Path
 import random
-from sympy import isprime
 from loguru import logger
 from blake3 import blake3
 from Crypto.Cipher import AES
