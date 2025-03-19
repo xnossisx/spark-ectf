@@ -6,48 +6,25 @@ Date: 2025
 import argparse
 import json
 from pathlib import Path
-from sympy import isprime
-import gmpy2
-import prime_gen
+import random
 from loguru import logger
 from blake3 import blake3
+from Crypto.Cipher import AES
 
 
-def get_primes_starting_with(start, amount): 
-    primes = []
-    i = start
-    while len(primes) < amount:
-        i += 2
-        if isprime(i):
-            primes.append(i)
-    return primes
-
+# Hashes it with Blake3
 def compress(n, section):
-    compressed = int.from_bytes(blake3(section.to_bytes(1, byteorder="big")).update(n.to_bytes(128, byteorder="big")).digest()) & (2 ** 128 - 1)
+    compressed = int.from_bytes(blake3(section.to_bytes(1, byteorder="big")).update(n.to_bytes(16, byteorder="big")).digest()) & (2 ** 128 - 1)
     return compressed
 
-# Gets the position of the last bit that is on in the number.
-def get_last_on_bit(num):
-    for i in range(0, 64):
-        if num & (1 << i) > 0:
-            return i
-    return 0
 
-def wind_encoder_compressed(root, target, exponents, modulus):
-    stop = get_last_on_bit(target) # For our case, we need to stop the bit rendering right before we expand the key.
-    expanded = gmpy2.powmod(exponents[0], root, modulus) # Since we're in the encoder, we use the base-case exponent.
-    compressed = root
+def wind_encoder(root, target):
+    result = root
     for section in range(64, -1, -1):
         mask = 1 << section
-        print(section, mask & target)
         if mask & target > 0:
-            if gmpy2.bit_length(expanded) > 128:
-                compressed = compress(expanded, section)
-        if section == stop:
-            return compressed
-        if mask & target > 0:
-            expanded = gmpy2.powmod(exponents[section], compressed, modulus)
-
+            result = compress(result, section)
+    return result
             
 def next_required_intermediate(start):
     complement = 0
@@ -59,23 +36,23 @@ def next_required_intermediate(start):
     return start + complement
 
 
-def get_intermediates(start, end, root, exponents, modulus):
+def get_intermediates(start, end, root):
     intermediates = {}
     if start == 0:
         intermediates[start] = root
         return intermediates
     while True:
-        intermediates[start] = wind_encoder_compressed(root, start, exponents, modulus)
+        intermediates[start] = wind_encoder(root, start)
         start = next_required_intermediate(start)
         if start > end:
             break
     return intermediates
 
-def pack_intermediates(intermediates: dict):
+def pack_intermediates(intermediates: dict, secret: int):
     _res = b""
     positions = sorted(intermediates.keys())
     for position in positions:
-        _res += intermediates[position].to_bytes(16, byteorder="big")
+        _res += encrypt(intermediates[position].to_bytes(16, byteorder="big"), secret)
     # Pack the remainder of the 1024 bytes
     for _ in range((64 * 16) - len(positions) * 16):
         _res += b"\x00"
@@ -91,16 +68,22 @@ def pack_inter_positions(intermediates: dict):
         _res += b"\x00"
     return _res
 
-def pack_metadata(channel: int, modulus: int, start: int, end: int, forward_inters: dict, backward_inters: dict, encryption_e, encryption_modulus):
+def pack_metadata(channel: int, start: int, end: int, forward_inters: dict, backward_inters: dict):
     _res = channel.to_bytes(4, byteorder='big') + \
         start.to_bytes(8, byteorder='big') + end.to_bytes(8, byteorder='big') + \
     	len(forward_inters).to_bytes(1, byteorder='big') + len(backward_inters).to_bytes(1, byteorder='big') + \
-        pack_inter_positions(forward_inters) + pack_inter_positions(backward_inters) + \
-        pow(modulus, encryption_e, encryption_modulus).to_bytes(160, byteorder='big')
+        pack_inter_positions(forward_inters) + pack_inter_positions(backward_inters)
     
     for _ in range(1280 - len(_res)):
         _res += b"\x00"
     return _res
+
+def encrypt(data, seed):
+    key = random.Random(seed).randbytes(32)
+
+    cipher = AES.new(key[:16], AES.MODE_OFB, iv=key[16:])
+
+    return cipher.encrypt(data)
 
 def gen_subscription(
     secrets: bytes, device_id: int, start: int, end: int, channel: int
@@ -117,21 +100,19 @@ def gen_subscription(
     """
     secrets = json.loads(secrets)
 
-    modulus = secrets[str(channel)]["modulus"]
-    exponents = get_primes_starting_with(1025, 64)
-
     forward = secrets[str(channel)]["forward"]
     backward = secrets[str(channel)]["backward"]
 
     end_of_time = 2**64 - 1
-    forward_inters = get_intermediates(start, end, forward, exponents, modulus)
+    forward_inters = get_intermediates(start, end, forward)
 
-    backward_inters = get_intermediates(end_of_time - end, end_of_time - start, backward, exponents, modulus)
+    backward_inters = get_intermediates(end_of_time - end, end_of_time - start, backward)
     # Finally, we pack this like follows:
-    p, q, e, d = prime_gen.gen_keys_seed(1280, (secrets["systemsecret"] << 64) + (int(device_id, base=0) << 32) + channel)
+    secret = (secrets["systemsecret"] << 64) + (device_id << 32) + channel
+
     # Pack the subscription. This will be sent to the decoder with ectf25.tv.subscribe
-    return pack_metadata(channel, modulus, start, end, forward_inters, backward_inters, e, p * q) + \
-        pack_intermediates(forward_inters) + pack_intermediates(backward_inters)
+    return pack_metadata(channel, start, end, forward_inters, backward_inters) + \
+        pack_intermediates(forward_inters, secret) + pack_intermediates(backward_inters, secret)
 
 def parse_args():
     """Define and parse the command line arguments

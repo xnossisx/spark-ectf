@@ -25,13 +25,16 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y \
     unzip \
     zlib1g-dev
 
+
 RUN rustup target add thumbv7em-none-eabihf
 
-COPY . /decoder
 WORKDIR /
-RUN pip install --no-cache-dir -r /decoder/requirements.txt --break-system-packages
-
-CMD ["python3", "/decoder/build.py"]
+COPY requirements.txt .
+RUN ls
+RUN pip install --no-cache-dir -r /requirements.txt --break-system-packages
+WORKDIR /decoder
+CMD ["python3", "build.py"]
 
 # Sample run command:
-# docker run --rm -v ./build_out:/out -v ./:/decoder -v ./secrets:/secrets -e DECODER_ID=0xdeadbeef decoder
+# docker build -t build-decoder ./decoder (if changes have been made)
+# docker run --rm -v ./build_out:/out -v ./decoder:/decoder -v ./global.secrets:/global.secrets -e DECODER_ID=0xdeadbeef build-decoder

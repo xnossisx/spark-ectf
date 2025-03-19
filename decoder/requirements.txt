@@ -1,5 +1,5 @@
 loguru
-gmpy2
 rsa
-sympy
+pathlib
 blake3
+pycryptodome

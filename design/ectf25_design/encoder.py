@@ -9,52 +9,28 @@ Date: 2025
 import argparse
 import struct
 import json
-import gmpy2
-from sympy import isprime
+
 import time
 from blake3 import blake3
-
-def fletcher32(bytes):
-    a = list(bytes)
-    b = [sum(a[:i])%65535 for i in range(len(a)+1)]
-    return (sum(b) << 16) | max(b)
-
-def powmod(a, b, modulus, prime_1, prime_2):
-    b_red_1 = gmpy2.f_mod(b, prime_1 - 1)
-    b_red_2 = gmpy2.f_mod(b, prime_2 - 1)
-    q_inv = gmpy2.invert(prime_2, prime_1)
-    m_1 = gmpy2.powmod(a, b_red_1, prime_1)
-    m_2 = gmpy2.powmod(a, b_red_2, prime_2)
-    sub = gmpy2.f_mod(q_inv*(m_1-m_2), prime_1)
-
-    return gmpy2.f_mod(m_2 + (sub * prime_2), modulus)
+from Crypto.PublicKey import ECC
+from Crypto.Signature import eddsa
+from Crypto.Hash import SHA512 
 
 # Hashes it with Blake3
 def compress(n, section):
-    compressed = int.from_bytes(blake3(section.to_bytes(1, byteorder="big")).update(n.to_bytes(128, byteorder="big")).digest()) & (2 ** 128 - 1)
+    compressed = int.from_bytes(blake3(section.to_bytes(1, byteorder="big")).update(n.to_bytes(16, byteorder="big")).digest()) & (2 ** 128 - 1)
     return compressed
 
 
-def wind_encoder(root, target, exponents, modulus, p, q):
-    # If the root is already expanded, we may immediately begin the algorithm. If not, we assume it is the time 0 compressed form, which needs the base case expansion.
-    if gmpy2.bit_length(root) <= 128:
-        result = powmod(exponents[0], root, modulus, p, q)
-    else:
-        result = root
+def wind_encoder(root, target):
+    result = root
     for section in range(64, -1, -1):
         mask = 1 << section
         if mask & target > 0:
-            result = powmod(exponents[section], compress(result, section), modulus, p, q)
+            print(section, result)
+            result = compress(result, section)
     return result
 
-def get_primes_starting_with(start, amount): 
-    primes = []
-    i = start
-    while len(primes) < amount:
-        i += 2
-        if isprime(i):
-            primes.append(i)
-    return primes
 class Encoder:
     channel_cache = -1
     cache_mask = 0xfffffffffff00000 # This encoder caches 10 out of the 16 nibbles in a timestamp
@@ -70,10 +46,9 @@ class Encoder:
         """
         # TODO: parse your secrets data here and run any necessary pre-processing to
         #   improve the throughput of Encoder.encode
-        self.exponents = get_primes_starting_with(1025, 64)
-
         # Load the json of the secrets file
         secrets = json.loads(secrets)
+        self.signer = ECC.import_key(encoded=secrets["private"], curve_name="Ed25519")
 
         # Load the example secrets for use in Encoder.encode
         # This will be "EXAMPLE" in the reference design"
@@ -101,13 +76,7 @@ class Encoder:
         # TODO: encode the satellite frames so that they meet functional and
         #  security requirements
 
-        
-        modulus = self.secrets[str(channel)]["modulus"]
-        print(modulus)
-        totient = (self.secrets[str(channel)]["p"] - 1) * (self.secrets[str(channel)]["q"] - 1)
         end_of_time = 2**64 - 1
-        p = self.secrets[str(channel)]["p"]
-        q = self.secrets[str(channel)]["q"]
 
         if self.channel_cache != channel or (timestamp & self.cache_mask) != self.cached_timestamp:
             # Break the timestamp into two parts
@@ -115,21 +84,22 @@ class Encoder:
             self.channel_cache = channel
             forward_root = self.secrets[str(channel)]["forward"]
             backward_root = self.secrets[str(channel)]["backward"]
-            self.cached_forward = wind_encoder(forward_root, self.cached_timestamp, self.exponents, modulus, p, q)
-            self.cached_backward = wind_encoder(backward_root, (end_of_time - self.cached_timestamp) & self.cache_mask, self.exponents, modulus, p, q)
+            self.cached_forward = wind_encoder(forward_root, self.cached_timestamp)
+            self.cached_backward = wind_encoder(backward_root, (end_of_time - self.cached_timestamp) & self.cache_mask)
 
         extra = timestamp & ~self.cache_mask
-
-        forward = wind_encoder(self.cached_forward, extra, self.exponents, modulus, p, q)
-        backward = wind_encoder(self.cached_backward, (end_of_time & ~self.cache_mask) - extra, self.exponents, modulus, p, q)
-        print(forward)
-        print(backward)
-
-        guard = forward ^ backward
-
-        encoded = powmod(int.from_bytes(frame) ^ guard, self.secrets[str(channel)]["d"], modulus, p, q).to_bytes(128, byteorder="big")
+        print(self.secrets[str(channel)]["forward"],  self.secrets[str(channel)]["backward"])
+        forward = wind_encoder(self.cached_forward, extra)
+        backward = wind_encoder(self.cached_backward, (end_of_time & ~self.cache_mask) - extra)
+        print(hex(forward), hex(backward))
         
-        return struct.pack("<IQ", channel, timestamp) + encoded
+        guard = ((forward ^ backward) * 0x5CF481FFE6F11B408D66FFF23E5AB827B33DE52A2B3CECB41151001328ED091FBE600B23F21FBF327BB013A8267590805548377BAFDEBB6C467AF95F56AF3AE7) % (2 ** 512)
+
+        print(hex(guard))
+
+        signature = eddsa.new(key=self.signer, mode='rfc8032', context=channel.to_bytes(4)).sign(SHA512.new(frame))
+        print(hex((guard ^ int.from_bytes(frame))))
+        return struct.pack(">IQ", channel, timestamp) + signature + (guard ^ int.from_bytes(frame)).to_bytes(64)
 
 
 def main():
@@ -147,10 +117,24 @@ def main():
     parser.add_argument("channel", type=int, help="Channel to encode for")
     parser.add_argument("frame", help="Contents of the frame")
     parser.add_argument("timestamp", type=int, help="64b timestamp to use")
+    parser.add_argument(
+        "--time",
+        "-t",
+        action="store_true",
+        help="Perform timing test",
+    )
     args = parser.parse_args()
 
     encoder = Encoder(args.secrets_file.read())
-    print(repr(encoder.encode(args.channel, args.frame.encode(), args.timestamp)))
+
+    if args.time:
+        s = time.time()
+        for i in range(1000):
+            encoder.encode(args.channel, args.frame.encode(), args.timestamp)
+        d = time.time() - s
+        print(d)
+    else:   
+        print(repr(encoder.encode(args.channel, args.frame.encode(), args.timestamp)))
 
 if __name__ == "__main__":
     main()

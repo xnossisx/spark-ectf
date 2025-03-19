@@ -1,32 +1,32 @@
-use crate::{get_channels, get_loc_for_channel, SUB_SPACE};
-use crate::pac::{Flc, Uart0};
+use crate::{get_loc_for_channel, Integer, SUB_SPACE};
+use crate::pac::Uart0;
 use crate::subscription::{get_subscriptions, Subscription};
-use crate::{flash, load_subscription, SUB_LOC, SUB_SIZE};
-use alloc::alloc::alloc;
+use crate::{flash, load_subscription, SUB_LOC};
+use alloc::alloc::{alloc, dealloc};
 use alloc::format;
 use alloc::string::ToString;
 use core::alloc::Layout;
 use core::cmp::min;
 use core::mem::MaybeUninit;
 use cortex_m::asm::nop;
-use crypto_bigint::U1024;
-use hal::gcr::clocks::{Clock, PeripheralClock, SystemClockResults};
+use ed25519_dalek::{Digest, DigestVerifier, Sha512, Signature, VerifyingKey};
+use hal::gcr::clocks::{Clock, PeripheralClock};
 use hal::gcr::GcrRegisters;
 use hal::gpio::{Af1, Pin};
 use hal::uart::BuiltUartPeripheral;
 
 static MAGIC: u8 = b'%';
 
-pub(crate) type cons = BuiltUartPeripheral<Uart0, Pin<0, 0, Af1>, Pin<0, 1, Af1>, (), ()>;
+pub(crate) type Cons = BuiltUartPeripheral<Uart0, Pin<0, 0, Af1>, Pin<0, 1, Af1>, (), ()>;
 
 // Core reference to our flash (initially uninitialized)
-const CONSOLE_HANDLE: MaybeUninit<cons> = MaybeUninit::uninit();
+const CONSOLE_HANDLE: MaybeUninit<Cons> = MaybeUninit::uninit();
 
 /**
  * Gets a reference to the console
  * @output: An immutable console reference
  */
-pub fn console() -> &'static cons {
+pub fn console() -> &'static Cons {
     unsafe { CONSOLE_HANDLE.assume_init_ref() }
 }
 
@@ -45,13 +45,11 @@ pub fn init(
     tx_pin: Pin<0, 1, Af1>,
     pclk: &Clock<PeripheralClock>
 ) {
-    unsafe {
-        CONSOLE_HANDLE.write(hal::uart::UartPeripheral::uart0(uart0, reg, rx_pin, tx_pin)
-            .baud(115200)
-            .clock_pclk(pclk)
-            .parity(hal::uart::ParityBit::None)
-            .build());
-    }
+    CONSOLE_HANDLE.write(hal::uart::UartPeripheral::uart0(uart0, reg, rx_pin, tx_pin)
+        .baud(115200)
+        .clock_pclk(pclk)
+        .parity(hal::uart::ParityBit::None)
+        .build());
 }
 
 /// Sends a properly formatted debug message to the console.
@@ -126,18 +124,19 @@ pub fn ack() {
 /// Reads whatever the TV is sending over right now, and responds to it.
 /// @param subscriptions: A list of subscriptions.
 /// @param console: A reference to the UART console.
-pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Subscription; 9]) {
+pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription>; 9], verifier: VerifyingKey) {
     // Check that the first byte is the magic byte %; otherwise, we return
     let magic = read_byte();
 
     if magic != MAGIC {
         write_console(b"that was not magic");
+        write_console(&[magic]);
         return;
     }
 
     // Reads and checks the validity of the opcode
     let opcode = read_byte();
-    if (opcode != b'E' && opcode != b'L' && opcode != b'S' && opcode != b'D' && opcode != b'A') {
+    if opcode != b'E' && opcode != b'L' && opcode != b'S' && opcode != b'D' && opcode != b'A' {
         write_console(b"that was not an opcode");
         write_console(&[opcode]);
         return;
@@ -148,6 +147,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Subscription; 9]) {
     write_console(b"bonjour");
     unsafe {
         if opcode == b'L' {
+            ack();
             // Responds to the list command by getting the subscriptions...
             let subscriptions = get_subscriptions(flash);
             if let Ok(l) = Layout::from_size_align(4usize + subscriptions.len()*20usize, 16) {
@@ -164,6 +164,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Subscription; 9]) {
                     ret[i*20usize+16..i*20usize+24].copy_from_slice(bytemuck::bytes_of(&(subscriptions[i].end)));
                 }
                 write_comm(ret,b'L');
+                dealloc(ret.as_mut_ptr(), l);
                 return;
             } else {
                 write_err(b"Alloc error");
@@ -186,28 +187,50 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Subscription; 9]) {
                     for byte in &mut *byte_list {
                         *byte = read_byte();
                     }
+
                     if i == 0 {
-                        // Casts the first 4 bytes to the channel value
-                        channel = get_loc_for_channel(((byte_list[0] as u32) << 24) +
+                        let channel_id = ((byte_list[0] as u32) << 24) +
                             ((byte_list[1] as u32) << 16) +
-                            ((byte_list[2] as u32) << 8) + (byte_list[3] as u32));
+                            ((byte_list[2] as u32) << 8) + (byte_list[3] as u32);
+                        // Casts the first 4 bytes to the channel value
+                        channel = get_loc_for_channel(channel_id);
+
                         pos = SUB_LOC as u32 + (channel * SUB_SPACE);
-                        unsafe {
-                            flash.erase_page(pos).unwrap_or_else(|test| {
-                                write_err(flash::map_err(test).as_bytes());
-                            });
-                        }
+                        flash.erase_page(pos).unwrap_or_else(|test| {
+                            write_err(flash::map_err(test).as_bytes());
+                        });
                     } else {
                         pos += 256;
                     }
                     // Writes data to the flash
-                    flash::write_bytes(flash, pos, &byte_list, 256).unwrap_or_else(|test| {
-                        write_err(test);
+                    flash::write_bytes(flash, pos, &byte_list, 256).unwrap_or_else(|err| {
+                        write_err(err);
                     });
+                    if i == 0 {
+
+                    }
                     ack();
                 }
+                // Test to see if it was actually written
+                let dst = &mut [0; 256];
+                let test = flash::read_bytes(flash, SUB_LOC as u32 + (channel * SUB_SPACE), dst, 256);
+                if test.is_err() {
+                    write_err(test.unwrap_err());
+                }
+                write_console(dst);
+                
                 // Load subscription and send debug information
-                load_subscription(flash, &mut subscriptions[channel as usize], channel as usize);
+                write_console(b"written");
+
+                subscriptions[channel as usize] = load_subscription(flash, channel as usize);
+                write_console(b"living");
+
+                if subscriptions[channel as usize].is_none() {
+                    write_console(b"Failed to load subscription");
+                } else {
+                    write_console(b"Success");
+                }
+                
                 write_comm(b"",b'S');
             }
             b'D' => {
@@ -223,9 +246,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Subscription; 9]) {
                 let byte_list: &mut [u8] = core::slice::from_raw_parts_mut(alloc(layout), length as usize);
                 ack();
                 // Receives bytes
-                for i in 0..((length + 255) >> 8) {
-                    //console.read_bytes(get_range(byte_list, i, length));
-                    
+                for _ in 0..((length + 255) >> 8) {
                     for byte in &mut *byte_list {
                         *byte = read_byte();
                     }
@@ -235,19 +256,50 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Subscription; 9]) {
                 // Splits up the data
                 let channel: u32 = u32::from_be_bytes(*&byte_list[0..4].try_into().unwrap());
                 let timestamp: u64 = u64::from_be_bytes(*&byte_list[4..12].try_into().unwrap());
-                let frame: U1024 = <crate::Integer>::from_be_slice(byte_list[12..140].try_into().unwrap()); // 128 bytes
+                let frame: Integer = <crate::Integer>::from_be_slice(&byte_list[76..140]); // 64 bytes
+                let signature: Signature = Signature::from_slice(&byte_list[12..76]).unwrap();
                 //let checksum: u32 = u32::from_be_bytes(*&byte_list[140..144].try_into().unwrap());
 
                 // Get the relevant subscription, and use it to decode
-                let sub = subscriptions.into_iter().filter(|s| s.channel == channel && s.n.bits() > 1).next().unwrap();
-                write_console(format!("Channel: {}\n", sub.channel).as_bytes());
+                let mut sub: Option<Subscription> = None;
+                for sub_i in subscriptions {
+                    if sub_i.is_some() && sub_i.clone().unwrap().channel == channel {
+                        sub = Some(sub_i.clone().unwrap());
+                        write_console(b"done");
+                        break;
+                    }
+                }
 
-                let decoded = sub.decode(flash, frame, timestamp);
+                if sub.is_none() {
+                    write_console(channel.to_string().as_bytes());
+                    write_err(b"No channel for this frame!");
+                    return;
+                }
+
+                write_console(format!("Channel: {}\n", channel).as_bytes());
+                write_console(format!("timestamp: {}\n", timestamp).as_bytes());
+
+                let decoded = sub.unwrap().decode(flash, frame, timestamp);
 
                 let ret: [u8; 64] = decoded.to_be_bytes();
 
+                write_console(&ret);
+
+                let ret_digest = Sha512::default().chain_update(ret);
+
+                let chan_bytes = channel.to_be_bytes();
+                let verifier_context = verifier.with_context(&chan_bytes).unwrap();
+                let evaluation = verifier_context.verify_digest(ret_digest, &signature);
+
+                if evaluation.is_err() {
+                    write_console(b"Key verification failed - frame spoofing may be happening!");
+                    write_err(b"Not the actual frame");
+                    return;
+                }
+
                 // Return the decoded bytes to the TV
                 write_comm(&ret,b'D');
+                dealloc(byte_list.as_mut_ptr(),layout);
 
             }
             _ => return
