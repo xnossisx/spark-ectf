@@ -61,4 +61,4 @@ subprocess.run(["cargo", "build", "--release"], cwd=".")
 
 # Move the output to /out
 # subprocess.run(["find", ".", "-name", "spark-decoder"])
-subprocess.run(["mv", "target/thumbv7em-none-eabihf/release/spark-decoder", "/out"], cwd=".")
+subprocess.run(["mv", "target/thumbv7em-none-eabihf/release/spark-decoder", "/out/max78000.bin"], cwd=".")
