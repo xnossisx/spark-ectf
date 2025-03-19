@@ -13,6 +13,11 @@ opt-level = 3        # Use slightly better optimizations.
 overflow-checks = false     # Disable integer overflow checks.
 lto=true
 
+[profile.release]
+opt-level = 3        # Use slightly better optimizations.
+overflow-checks = false     # Disable integer overflow checks.
+lto=true
+
 [dependencies]
 cortex-m = { version = "0.7.7", features = ["critical-section-single-core"], default-features = false }
 cortex-m-rt = { version = "0.7.5", features = ["set-sp", "set-vtor"], default-features = false }

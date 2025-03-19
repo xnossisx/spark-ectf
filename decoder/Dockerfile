@@ -21,10 +21,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y \
     python3-pip \
     git \
     libtool \
-    texinfo \
-    unzip \
-    zlib1g-dev
-
+    texinfo
 
 RUN rustup target add thumbv7em-none-eabihf
 
