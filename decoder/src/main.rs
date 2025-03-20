@@ -104,8 +104,8 @@ fn main() -> ! {
     // Load subscription from flash memory
     let flash = flash::init(p.flc, clks);
     let mut subscriptions: [Option<Subscription>; 9] = load_subscriptions(&flash);
-    
     let divisor = load_verification_key();
+    console::write_console(b"Booted up");
 
     // Fundamental event loop
     loop {
@@ -115,6 +115,8 @@ fn main() -> ! {
         let output = test(test_val, &trng, &mut delay);
         if test_val*test_val == output {
             console::read_resp(&flash, &mut subscriptions, divisor);
+        } else {
+            console::write_err(b"Integrity check failed");
         }
     }
 }
@@ -176,13 +178,8 @@ fn load_subscription(flash: &hal::flc::Flc, channel_pos: usize) -> Option<Subscr
     unsafe {
         let _ = flash::read_bytes(flash, address as u32, &mut (*cache.as_ptr()), REQUIRED_MEMORY as usize);
 
-        let test = &(*cache.as_ptr())[0..20];
-        console::write_console(test);
         let init = (*cache.as_ptr())[20]; // Should always be non-zero if it's loaded right
         if init == 0 || init == 0xFF {
-            if (init == 0) {
-                console::write_console(b"NotCleared\n");
-            }
             return None;
         }
         let mut pos = 0;
