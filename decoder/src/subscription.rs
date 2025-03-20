@@ -35,7 +35,6 @@ pub fn get_subscriptions(flash: &hal::flc::Flc) -> Vec<SubStat> {
         let mut data: [u8; 22] = [0; 22];
 
         let _res = flash::read_bytes(flash, (SUB_LOC as u32) + (i as u32) * FLASH_PAGE_SIZE, &mut data, 22);
-        console::write_console(&data);
         if (data[20] == 0) || (data[20] == 0xff) { continue; }
         ret.push(SubStat {
             exists: data[20] != 0 && data[20] != 0xff,

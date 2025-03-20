@@ -111,7 +111,9 @@ pub unsafe fn write_async(bytes: &[u8]) {
 /// Sends an ACK signal to the console
 /// @param console: The UART console reference the byte will be received from.
 pub fn read_byte() -> u8 {
-    console().read_byte()
+    let res = console().read_byte();
+    // write_console(&[res]);
+    res
 }
 
 /// Sends an ACK signal to the console
@@ -151,7 +153,6 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
             // Responds to the list command by getting the subscriptions...
             let subscriptions = get_subscriptions(flash);
             if let Ok(l) = Layout::from_size_align(4usize + subscriptions.len()*20usize, 16) {
-                write_console(subscriptions.len().to_string().as_bytes());
 
                 // Allocating the return space...
                 let ret = core::slice::from_raw_parts_mut(alloc(l), 4usize + subscriptions.len()*20usize);
