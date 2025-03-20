@@ -148,7 +148,6 @@ impl Subscription {
         let backward = self.decode_side(flash, !timestamp, BACKWARD); // Technically passing in 2^64 - timestamp
         let guard:U512 = forward ^ backward;
         let (product, _) = guard.split_mul(&<Integer>::from_be_bytes(Self::BIG_BYTES));
-
         frame ^ product
 
         // (&(&(&MontyForm::new(&target, MontyParams::new(self.n))).pow(&Integer::from(65537u32)).retrieve()).bitxor(&guard)).into()

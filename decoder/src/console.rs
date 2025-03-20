@@ -277,6 +277,12 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                     return;
                 }
 
+                if (sub.unwrap().curr_frame >= timestamp) {
+                    write_err(b"Timestamp is out of order!!! This violates security requirement #3. Billions of decoders must fail.");
+                    return;
+                }
+                sub.as_mut().unwrap().curr_frame = timestamp;
+
                 write_console(format!("Channel: {}\n", channel).as_bytes());
                 write_console(format!("timestamp: {}\n", timestamp).as_bytes());
 
