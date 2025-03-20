@@ -57,7 +57,7 @@ with open("/decoder/src/public.bin", "xb+") as f:
 os.putenv("CHANNELS", ",".join([str(channel) for channel in channels if channel != 0]))
 
 # Build the decoder
-subprocess.run(["cargo" "objcopy" "--profile" "release" "--" "-O" "binary" "app.bin"], cwd=".")
+subprocess.run(["cargo", "objcopy", "--profile", "release", "--", "-O", "binary", "app.bin"], cwd=".")
 
 # Move the output to /out
 # subprocess.run(["find", ".", "-name", "spark-decoder"])
