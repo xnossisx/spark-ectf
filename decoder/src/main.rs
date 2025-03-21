@@ -58,13 +58,6 @@ pub const SUB_LOC: *const u8 = 0x10036000 as *const u8;
 
 #[entry]
 fn main() -> ! {
-    // Initializes our heap
-    {
-        use core::mem::MaybeUninit;
-        const HEAP_SIZE: usize = 1024;
-        static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
-        unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
-    }
 
     // Initialize peripherals
     let p = pac::Peripherals::take().unwrap();
@@ -79,31 +72,55 @@ fn main() -> ! {
 
     // Initialize and split the GPIO0 peripheral into pins
     let gpio0_pins = hal::gpio::Gpio0::new(p.gpio0, &mut gcr.reg).split();
+
+    let pins = hal::gpio::Gpio2::new(p.gpio2, &mut gcr.reg).split();
+
+    let mut led_r = pins.p2_0.into_input_output();
+    let mut led_g = pins.p2_1.into_input_output();
+    let mut led_b = pins.p2_2.into_input_output();
+
+    led_r.set_power_vddioh();
+    led_g.set_power_vddioh();
+    led_b.set_power_vddioh();
+    // Initialize a delay timer using the ARM SYST (SysTick) peripheral
+    let rate = clks.sys_clk.frequency;
+    let mut delay = Delay::new(core.SYST, rate);
+    
+    // LED blink loop
+    loop {
+        led_r.set_high();
+        delay.delay_ms(500);
+        led_g.set_high();
+        delay.delay_ms(500);
+        led_b.set_high();
+        delay.delay_ms(500);
+        led_r.set_low();
+        delay.delay_ms(500);
+        led_g.set_low();
+        delay.delay_ms(500);
+        led_b.set_low();
+        delay.delay_ms(500);
+    }
     // Configure UART to host computer with 115200 8N1 settings
     let rx_pin = gpio0_pins.p0_0.into_af1();
     let tx_pin = gpio0_pins.p0_1.into_af1();
     let _ = &console::init(p.uart0, &mut gcr.reg, rx_pin, tx_pin, &clks.pclk);
     console::write_console(b"Console loaded");
+
+    // Initializes our heap
+    {
+        use core::mem::MaybeUninit;
+        const HEAP_SIZE: usize = 1024;
+        static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
+        unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
+    }
 /*  loop {
         write_console(&[console::read_byte()]);
     }*/
-    let pins = hal::gpio::Gpio2::new(p.gpio2, &mut gcr.reg).split();
 
-    let led_r = pins.p2_0.into_input_output();
-    let led_g = pins.p2_1.into_input_output();
-    let led_b = pins.p2_2.into_input_output();
 
     // Initialize the trng peripheral
     let trng = Trng::new(p.trng, &mut gcr.reg);
-
-
-    // Use VDDIOH as the power source for the RGB LED pins (3.0V)
-    // Note: This HAL API may change in the future
-
-    // Initialize a delay timer using the ARM SYST (SysTick) peripheral
-    let rate = clks.sys_clk.frequency;
-
-    let mut delay = Delay::new(core.SYST, rate);
 
     // Load subscription from flash memory
     let flash = flash::init(p.flc, clks);

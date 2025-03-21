@@ -1,4 +1,4 @@
-file target/thumbv7em-none-eabihf/debug/spark-decoder
+file ../build_out/max78000.bin
 
 target extended-remote :3333
 
