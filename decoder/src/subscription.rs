@@ -1,6 +1,6 @@
 use alloc::format;
 use alloc::string::ToString;
-use crate::console;
+use crate::{console, get_loc_for_channel};
 use crate::{decrypt_intermediate, flash, Integer, INTERMEDIATE_LOC, INTERMEDIATE_NUM, INTERMEDIATE_SIZE, SUB_LOC, SUB_SIZE};
 use alloc::vec::Vec;
 use blake3::Hasher;
@@ -109,13 +109,15 @@ impl Subscription {
         }
 
         let compressed_enc: u128 = self.get_intermediate(&flash, closest_idx, dir);
-        let mut compressed= decrypt_intermediate(compressed_enc, self.channel);
+        let mut compressed= decrypt_intermediate(compressed_enc, get_loc_for_channel(self.channel));
         // The number of trailing zeros helps determine what step the intermediate is at! Perfect.
         let mut idx = INTERMEDIATE_NUM - 1;
         loop {
             let mask = 1 << idx;
             if mask & target != 0 {
-                compressed = Self::compress(compressed, idx as u8);
+/*                console::write_console(idx.to_string().as_bytes());
+                console::write_console(compressed.to_string().as_bytes());
+*/                compressed = Self::compress(compressed, idx as u8);
             }
             if idx == 0 {
                 break;

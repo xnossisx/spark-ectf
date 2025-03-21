@@ -9,6 +9,7 @@ use cortex_m::delay::Delay;
 use crypto_bigint::U512;
 use ed25519_dalek::{VerifyingKey};
 use embedded_alloc::LlffHeap;
+use embedded_io::ReadReady;
 
 type Integer = U512;
 
@@ -82,7 +83,10 @@ fn main() -> ! {
     let rx_pin = gpio0_pins.p0_0.into_af1();
     let tx_pin = gpio0_pins.p0_1.into_af1();
     let _ = &console::init(p.uart0, &mut gcr.reg, rx_pin, tx_pin, &clks.pclk);
-
+    console::write_console(b"Console loaded");
+/*  loop {
+        write_console(&[console::read_byte()]);
+    }*/
     let pins = hal::gpio::Gpio2::new(p.gpio2, &mut gcr.reg).split();
 
     let led_r = pins.p2_0.into_input_output();
@@ -107,6 +111,7 @@ fn main() -> ! {
     let divisor = load_verification_key();
     console::write_console(b"Booted up");
 
+
     // Fundamental event loop
     loop {
         // Delays to avoid side channel attacks
@@ -114,7 +119,8 @@ fn main() -> ! {
 
         let output = test(test_val, &trng, &mut delay);
         if test_val*test_val == output {
-            console::read_resp(&flash, &mut subscriptions, divisor);
+            // console::read_resp(&flash, &mut subscriptions, divisor);
+            console::write_console(b"hi I loaded");
         } else {
             console::write_err(b"Integrity check failed");
         }

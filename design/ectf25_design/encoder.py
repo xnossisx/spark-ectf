@@ -27,7 +27,7 @@ def wind_encoder(root, target):
     for section in range(64, -1, -1):
         mask = 1 << section
         if mask & target > 0:
-            print(section, result)
+            # print(section, result)
             result = compress(result, section)
     return result
 
@@ -88,17 +88,17 @@ class Encoder:
             self.cached_backward = wind_encoder(backward_root, (end_of_time - self.cached_timestamp) & self.cache_mask)
 
         extra = timestamp & ~self.cache_mask
-        print(self.secrets[str(channel)]["forward"],  self.secrets[str(channel)]["backward"])
+        # print(self.secrets[str(channel)]["forward"],  self.secrets[str(channel)]["backward"])
         forward = wind_encoder(self.cached_forward, extra)
         backward = wind_encoder(self.cached_backward, (end_of_time & ~self.cache_mask) - extra)
-        print(hex(forward), hex(backward))
+        # print(hex(forward), hex(backward))
         
         guard = ((forward ^ backward) * 0x5CF481FFE6F11B408D66FFF23E5AB827B33DE52A2B3CECB41151001328ED091FBE600B23F21FBF327BB013A8267590805548377BAFDEBB6C467AF95F56AF3AE7) % (2 ** 512)
 
-        print(hex(guard))
+        # print(hex(guard))
 
         signature = eddsa.new(key=self.signer, mode='rfc8032', context=channel.to_bytes(4)).sign(SHA512.new(frame))
-        print(hex((guard ^ int.from_bytes(frame))))
+        # print(hex((guard ^ int.from_bytes(frame))))
         return struct.pack(">IQ", channel, timestamp) + signature + (guard ^ int.from_bytes(frame)).to_bytes(64)
 
 
