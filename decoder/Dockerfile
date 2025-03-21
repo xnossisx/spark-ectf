@@ -24,8 +24,6 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y \
     texinfo
 
 RUN rustup target add thumbv7em-none-eabihf
-RUN cargo install cargo-binutils
-RUN rustup component add llvm-tools
 
 WORKDIR /
 COPY requirements.txt .
