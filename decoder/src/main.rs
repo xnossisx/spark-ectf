@@ -312,10 +312,10 @@ pub fn get_channels() -> [u32; 9] {
     // Get the channels from the environment variable CHANNELS, which is like "1,3,7,8" or something
     let channels = env!("CHANNELS");
     ret[0] = 0;
-    let mut i = 1;
+    let mut i  = 1;
     for channel in channels.split(",") {
         let pos = channel.parse::<u32>().unwrap();
-        if pos < ret.len() as u32 {
+        if i < ret.len() {
             ret[i] = pos;
         }
         i += 1;
