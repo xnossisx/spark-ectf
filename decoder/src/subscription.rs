@@ -9,6 +9,7 @@ use core::ops::BitXor;
 use crypto_bigint::{Encoding, I512, U1024, U512};
 use hal;
 use hal::flc::{Flc, FLASH_PAGE_SIZE};
+use crate::console::write_console;
 
 /// Indicate test keys to protect against tampering
 const FORWARD: u64 = 0x1f8c25d4b902e785;
@@ -47,7 +48,7 @@ pub fn get_subscriptions(flash: &hal::flc::Flc) -> Vec<SubStat> {
     ret
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 #[derive(Copy)]
 pub struct Subscription {
     pub(crate) forward_pos: [u64; INTERMEDIATE_NUM],
@@ -75,7 +76,9 @@ impl Subscription {
     pub fn get_intermediate(&self, flash: &hal::flc::Flc, pos: usize, dir: u64) -> u128 {
         if self.location == 0 { // Emergency channel
             let sub_bytes = include_bytes!("emergency.bin");
-            let intermediate_pos = INTERMEDIATE_LOC as usize + pos * INTERMEDIATE_SIZE + if dir == FORWARD {0} else {1024};
+            let intermediate_pos = INTERMEDIATE_LOC as usize + pos * INTERMEDIATE_SIZE + (if dir == FORWARD {0} else {1024});
+            write_console(b"Getting intermediate...");
+            write_console(&sub_bytes[intermediate_pos..intermediate_pos+16]);
             return u128::from_be_bytes(sub_bytes[intermediate_pos..intermediate_pos+16].try_into().unwrap());
         }
         
@@ -84,11 +87,11 @@ impl Subscription {
         else
             {self.location + (INTERMEDIATE_LOC as usize) + 1024 + pos * INTERMEDIATE_SIZE };
         let ref_location = ref_location as u32;
-        let intermediate_buffer: RefCell<[u8; INTERMEDIATE_SIZE]> = RefCell::new([0; INTERMEDIATE_SIZE]);
-        unsafe {
-            let _ = flash::read_bytes(flash, ref_location, &mut (*intermediate_buffer.as_ptr())[0..INTERMEDIATE_SIZE], INTERMEDIATE_SIZE);
-            u128::from_be_bytes((*intermediate_buffer.as_ptr()).try_into().unwrap())
-        }
+        let mut intermediate_buffer: [u8; INTERMEDIATE_SIZE] = [0; INTERMEDIATE_SIZE];
+        let _ = flash::read_bytes(flash, ref_location, &mut intermediate_buffer, INTERMEDIATE_SIZE);
+        write_console(format!("Intermediate {}",pos).as_bytes());
+        write_console(&intermediate_buffer);
+        u128::from_be_bytes(intermediate_buffer)
     }
 
     pub fn decode_side(&self, flash: &Flc, target: u64, dir: u64) -> U512 {
@@ -99,7 +102,7 @@ impl Subscription {
 
         // Finds the intermediate closest to the target
         for (i, idx_ref) in pos.iter().enumerate() {
-            if *idx_ref > target {
+            if *idx_ref > target || (*idx_ref == 0 && i != 0) {
                 break;
             }
             if *idx_ref > closest_pos {
@@ -109,15 +112,15 @@ impl Subscription {
         }
 
         let compressed_enc: u128 = self.get_intermediate(&flash, closest_idx, dir);
-        let mut compressed= decrypt_intermediate(compressed_enc, get_loc_for_channel(self.channel));
+        let mut compressed= decrypt_intermediate(compressed_enc, self.channel);
         // The number of trailing zeros helps determine what step the intermediate is at! Perfect.
         let mut idx = INTERMEDIATE_NUM - 1;
         loop {
             let mask = 1 << idx;
             if mask & target != 0 {
-/*                console::write_console(idx.to_string().as_bytes());
-                console::write_console(compressed.to_string().as_bytes());
-*/                compressed = Self::compress(compressed, idx as u8);
+                console::write_console(idx.to_string().as_bytes());
+                console::write_console(format!("{}", compressed).as_bytes());
+                compressed = Self::compress(compressed, idx as u8);
             }
             if idx == 0 {
                 break;

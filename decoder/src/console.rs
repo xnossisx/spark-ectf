@@ -9,6 +9,7 @@ use core::alloc::Layout;
 use core::cmp::min;
 use core::mem::MaybeUninit;
 use cortex_m::asm::nop;
+use cortex_m::peripheral::SYST;
 use ed25519_dalek::{Digest, DigestVerifier, Sha512, Signature, VerifyingKey};
 use hal::gcr::clocks::{Clock, PeripheralClock};
 use hal::gcr::GcrRegisters;
@@ -187,6 +188,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                     // Reads bytes from console
                     for byte in &mut *byte_list {
                         *byte = read_byte();
+
                     }
 
                     if i == 0 {
@@ -207,10 +209,10 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                     flash::write_bytes(flash, pos, &byte_list, 256).unwrap_or_else(|err| {
                         write_err(err);
                     });
+                    ack();
                     if i == 0 {
 
                     }
-                    ack();
                 }
                 // Test to see if it was actually written
                 let dst = &mut [0; 256];
@@ -221,10 +223,8 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                 write_console(dst);
                 
                 // Load subscription and send debug information
-                write_console(b"written");
 
                 subscriptions[channel as usize] = load_subscription(flash, channel as usize);
-                write_console(b"living");
 
                 if subscriptions[channel as usize].is_none() {
                     write_console(b"Failed to load subscription");
@@ -253,8 +253,6 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                     }
                     ack();
                 }
-                // Print byte_list to see if it works
-                write_console(byte_list);
 
                 // Splits up the data
                 let channel: u32 = u32::from_be_bytes(*&byte_list[0..4].try_into().unwrap());
@@ -279,11 +277,20 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                     return;
                 }
 
-                if (sub.unwrap().curr_frame >= timestamp) {
-                    write_err(b"Timestamp is out of order!!! This violates security requirement #3. Billions of decoders must fail.");
+                if (sub.unwrap().start > timestamp) {
+                    write_comm(b"fail", b'D');
+                    return;
+                } else if (sub.unwrap().end <= timestamp) {
+                    write_err(b"too late");
                     return;
                 }
-                sub.as_mut().unwrap().curr_frame = timestamp;
+
+                if (sub.unwrap().curr_frame > timestamp) {
+                    write_console(b"Timestamp is out of order!!! This violates security requirement #3. Billions of decoders must fail.");
+                    write_comm(b"fail",b'D');
+                    return;
+                }
+                sub.as_mut().unwrap().curr_frame = timestamp + 1;
 
                 write_console(format!("Channel: {}\n", channel).as_bytes());
                 write_console(format!("timestamp: {}\n", timestamp).as_bytes());

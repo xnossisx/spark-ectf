@@ -4,6 +4,7 @@
 use alloc::format;
 use hal::trng::Trng;
 use core::cell::RefCell;
+use core::ops::Deref;
 use core::panic::PanicInfo;
 use cortex_m::delay::Delay;
 use crypto_bigint::U512;
@@ -42,6 +43,7 @@ pub
 use hal::entry;
 use hal::flc::{FlashError, FLASH_PAGE_SIZE};
 pub use hal::pac;
+use hal::pac::i2c0::Hsclk;
 use ofb::cipher::{KeyIvInit, StreamCipher};
 use flash::flash;
 use crate::console::write_console;
@@ -79,15 +81,16 @@ fn main() -> ! {
     let mut led_g = pins.p2_1.into_input_output();
     let mut led_b = pins.p2_2.into_input_output();
 
-    led_r.set_power_vddioh();
+    let rate = clks.sys_clk.frequency;
+    let mut delay = Delay::new(core.SYST, rate);
+    /*led_r.set_power_vddioh();
     led_g.set_power_vddioh();
     led_b.set_power_vddioh();
     // Initialize a delay timer using the ARM SYST (SysTick) peripheral
-    let rate = clks.sys_clk.frequency;
-    let mut delay = Delay::new(core.SYST, rate);
-    
+
+
     // LED blink loop
-    loop {
+    {
         led_r.set_high();
         delay.delay_ms(500);
         led_g.set_high();
@@ -100,7 +103,7 @@ fn main() -> ! {
         delay.delay_ms(500);
         led_b.set_low();
         delay.delay_ms(500);
-    }
+    }*/
     // Configure UART to host computer with 115200 8N1 settings
     let rx_pin = gpio0_pins.p0_0.into_af1();
     let tx_pin = gpio0_pins.p0_1.into_af1();
@@ -110,7 +113,7 @@ fn main() -> ! {
     // Initializes our heap
     {
         use core::mem::MaybeUninit;
-        const HEAP_SIZE: usize = 1024;
+        const HEAP_SIZE: usize = 2048;
         static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
         unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
     }
@@ -136,8 +139,8 @@ fn main() -> ! {
 
         let output = test(test_val, &trng, &mut delay);
         if test_val*test_val == output {
-            // console::read_resp(&flash, &mut subscriptions, divisor);
-            console::write_console(b"hi I loaded");
+            console::read_resp(&flash, &mut subscriptions, divisor);
+            //console::write_console(b"hi I loaded");
         } else {
             console::write_err(b"Integrity check failed");
         }
@@ -168,6 +171,7 @@ fn load_subscriptions(flash: &hal::flc::Flc) -> [Option<Subscription>; 9] {
         ret[i] = load_subscription(flash, i);
     }
     ret[0] = load_emergency_subscription();
+    write_console(b"load_subscriptions finished");
     ret
 }
 
@@ -239,17 +243,22 @@ fn load_subscription(flash: &hal::flc::Flc, channel_pos: usize) -> Option<Subscr
     Some(subscription)
 }
 
-fn decrypt_intermediate(encrypted_modulus: u128, channel_pos: u32) -> u128 {
+fn decrypt_intermediate(encrypted_int: u128, channel: u32) -> u128 {
     // Get the right AES key
-    let mut copy = u128::to_be_bytes(encrypted_modulus);
+    let channel_pos = get_loc_for_channel(channel);
+    let mut copy = u128::to_be_bytes(encrypted_int);
     let private_keys = include_bytes!("keys.bin");
     let pos = (channel_pos * 32) as usize;
     let key: [u8; 16] = private_keys[pos + 0..pos + 16].try_into().unwrap();
 
     let iv: [u8; 16] = private_keys[pos + 16..pos + 32].try_into().unwrap();
-
+    write_console(format!("Decoded intermediate {channel}").as_bytes());
     let mut cipher = Aes128Ofb::new(&key.into(), &iv.into());
+    write_console(copy.as_slice());
     cipher.apply_keystream(&mut copy);
+    write_console(format!("Decrypted intermediate: ").as_bytes());
+    write_console(copy.as_slice());
+    write_console(format!("{}", u128::from_be_bytes(copy)).as_bytes());
     u128::from_be_bytes(copy)
 }
 fn load_emergency_subscription() -> Option<Subscription> {
@@ -259,6 +268,7 @@ fn load_emergency_subscription() -> Option<Subscription> {
     subscription.location = 0; // Done as a special case
     subscription.channel = u32::from_be_bytes(cache[pos..pos+4].try_into().unwrap());
     if subscription.channel != 0 {
+        write_console(b"why");
         return None;
     }
     pos += 4;
@@ -301,9 +311,13 @@ pub fn get_channels() -> [u32; 9] {
     let mut ret: [u32; 9] = [0; 9];
     // Get the channels from the environment variable CHANNELS, which is like "1,3,7,8" or something
     let channels = env!("CHANNELS");
-    let mut i = 0;
+    ret[0] = 0;
+    let mut i = 1;
     for channel in channels.split(",") {
-        ret[i] = channel.parse::<u32>().unwrap();
+        let pos = channel.parse::<u32>().unwrap();
+        if pos < ret.len() as u32 {
+            ret[i] = pos;
+        }
         i += 1;
     }
     

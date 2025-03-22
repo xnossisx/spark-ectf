@@ -25,7 +25,7 @@ def wind_encoder(root, target):
         if mask & target > 0:
             result = compress(result, section)
     return result
-            
+
 def next_required_intermediate(start):
     complement = 0
     for section in range(64, -1, -1):
@@ -52,7 +52,15 @@ def pack_intermediates(intermediates: dict, secret: int):
     _res = b""
     positions = sorted(intermediates.keys())
     for position in positions:
-        _res += encrypt(intermediates[position].to_bytes(16, byteorder="big"), secret)
+        val = encrypt(intermediates[position].to_bytes(16, byteorder="big"), secret)
+        print()
+        print("Intermediate value:")
+        print(intermediates[position])
+        print("Decrypted: ")
+        print(intermediates[position].to_bytes(16, byteorder="big"))
+        print("Encrypted: ")
+        print(val)
+        _res += val
     # Pack the remainder of the 1024 bytes
     for _ in range((64 * 16) - len(positions) * 16):
         _res += b"\x00"
@@ -70,23 +78,25 @@ def pack_inter_positions(intermediates: dict):
 
 def pack_metadata(channel: int, start: int, end: int, forward_inters: dict, backward_inters: dict):
     _res = channel.to_bytes(4, byteorder='big') + \
-        start.to_bytes(8, byteorder='big') + end.to_bytes(8, byteorder='big') + \
-    	len(forward_inters).to_bytes(1, byteorder='big') + len(backward_inters).to_bytes(1, byteorder='big') + \
-        pack_inter_positions(forward_inters) + pack_inter_positions(backward_inters)
-    
+           start.to_bytes(8, byteorder='big') + end.to_bytes(8, byteorder='big') + \
+           len(forward_inters).to_bytes(1, byteorder='big') + len(backward_inters).to_bytes(1, byteorder='big') + \
+           pack_inter_positions(forward_inters) + pack_inter_positions(backward_inters)
+
     for _ in range(1280 - len(_res)):
         _res += b"\x00"
     return _res
 
 def encrypt(data, seed):
     key = random.Random(seed).randbytes(32)
+    print("Sub random")
+    print(key)
 
     cipher = AES.new(key[:16], AES.MODE_OFB, iv=key[16:])
 
     return cipher.encrypt(data)
 
 def gen_subscription(
-    secrets: bytes, device_id: int, start: int, end: int, channel: int
+        secrets: bytes, device_id: int, start: int, end: int, channel: int
 ) -> bytes:
     """Generate the contents of a subscription.
 

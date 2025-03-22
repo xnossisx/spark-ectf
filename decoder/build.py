@@ -26,9 +26,12 @@ secret = secrets["systemsecret"]
 channels = secrets["channels"]
 
 def get_key_iv(seed) -> bytes:
-    return random.Random(seed).randbytes(32)
+    val = random.Random(seed).randbytes(32)
+    print("Build random")
+    print(val)
+    return val
 
-keys = [get_key_iv((secret << 64) + (decoder_id << 32) + channel) for channel in channels]
+keys = [get_key_iv((secret << 64) + (decoder_id << 32))] + [get_key_iv((secret << 64) + (decoder_id << 32) + channel) for channel in channels]
 print("Keys generated")
 
 # Export the keys to a file

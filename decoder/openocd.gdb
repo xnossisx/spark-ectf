@@ -1,3 +1,4 @@
+set architecture arm
 file ../build_out/max78000.bin
 
 target extended-remote :3333
