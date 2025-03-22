@@ -53,13 +53,6 @@ def pack_intermediates(intermediates: dict, secret: int):
     positions = sorted(intermediates.keys())
     for position in positions:
         val = encrypt(intermediates[position].to_bytes(16, byteorder="big"), secret)
-        print()
-        print("Intermediate value:")
-        print(intermediates[position])
-        print("Decrypted: ")
-        print(intermediates[position].to_bytes(16, byteorder="big"))
-        print("Encrypted: ")
-        print(int.from_bytes(val, byteorder="big"))
         _res += val
     # Pack the remainder of the 1024 bytes
     for _ in range((64 * 16) - len(positions) * 16):
