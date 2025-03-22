@@ -90,7 +90,6 @@ impl Subscription {
         let mut intermediate_buffer: [u8; INTERMEDIATE_SIZE] = [0; INTERMEDIATE_SIZE];
         let _ = flash::read_bytes(flash, ref_location, &mut intermediate_buffer, INTERMEDIATE_SIZE);
         write_console(format!("Intermediate {}",pos).as_bytes());
-        write_console(&intermediate_buffer);
         u128::from_be_bytes(intermediate_buffer)
     }
 
@@ -113,14 +112,15 @@ impl Subscription {
 
         let compressed_enc: u128 = self.get_intermediate(&flash, closest_idx, dir);
         let mut compressed= decrypt_intermediate(compressed_enc, self.channel);
+        write_console(compressed.to_string().as_bytes());
         // The number of trailing zeros helps determine what step the intermediate is at! Perfect.
-        let mut idx = INTERMEDIATE_NUM - 1;
+        let mut idx = trailing_zeroes_special(closest_pos) - 1;
         loop {
             let mask = 1 << idx;
-            if mask & target != 0 {
-                console::write_console(idx.to_string().as_bytes());
-                console::write_console(format!("{}", compressed).as_bytes());
-                compressed = Self::compress(compressed, idx as u8);
+            if mask & target != 0 { // Determines if the bit needs to be flipped on.
+/*                console::write_console(idx.to_string().as_bytes());
+                console::write_console(format!("{}", compressed).to_string().as_bytes());
+*/                compressed = Self::compress(compressed, idx as u8);
             }
             if idx == 0 {
                 break;
@@ -160,7 +160,7 @@ impl Subscription {
     }
 }
 pub fn trailing_zeroes_special(target: u64) -> usize {
-    if target == 0 {return 0;}
+    if target == 0 {return INTERMEDIATE_NUM;}
     target.trailing_zeros() as usize
 }
     
