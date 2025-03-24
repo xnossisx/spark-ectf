@@ -149,41 +149,39 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
     let length: u16 = (read_byte() as u16) + ((read_byte() as u16) << 8);
     write_console(b"bonjour");
     unsafe {
-        if opcode == b'L' {
-            ack();
-            // Responds to the list command by getting the subscriptions...
-            let subscriptions = get_subscriptions(flash);
-            if let Ok(l) = Layout::from_size_align(4usize + subscriptions.len()*20usize, 16) {
-
-                // Allocating the return space...
-                let ret = core::slice::from_raw_parts_mut(alloc(l), 4usize + subscriptions.len()*20usize);
-                ret[0..4].copy_from_slice(bytemuck::bytes_of(&(subscriptions.len() as u32)));
-                //ret[0..4] = bytemuck::try_cast(&(subscriptions.len() as u32)).unwrap();
-                // Casts parts of the subscription data to the listing
-                for i in 0..subscriptions.len() {
-                    ret[i*20usize+4..i*20usize+8].copy_from_slice(bytemuck::bytes_of(&(subscriptions[i].channel)));
-                    ret[i*20usize+8..i*20usize+16].copy_from_slice(bytemuck::bytes_of(&(subscriptions[i].start)));
-                    ret[i*20usize+16..i*20usize+24].copy_from_slice(bytemuck::bytes_of(&(subscriptions[i].end)));
-                }
-                write_comm(ret,b'L');
-                dealloc(ret.as_mut_ptr(), l);
-                return;
-            } else {
-                write_err(b"Alloc error");
-                return;
-            }
-
-        }
-
-
         match opcode {
+            b'L' => {
+                ack();
+                // Responds to the list command by getting the subscriptions...
+                let subscriptions = get_subscriptions(flash);
+                if let Ok(l) = Layout::from_size_align(4usize + subscriptions.len()*20usize, 16) {
+
+                    // Allocating the return space...
+                    let ret = core::slice::from_raw_parts_mut(alloc(l), 4usize + subscriptions.len()*20usize);
+                    ret[0..4].copy_from_slice(bytemuck::bytes_of(&(subscriptions.len() as u32)));
+                    //ret[0..4] = bytemuck::try_cast(&(subscriptions.len() as u32)).unwrap();
+                    // Casts parts of the subscription data to the listing
+                    for i in 0..subscriptions.len() {
+                        ret[i*20usize+4..i*20usize+8].copy_from_slice(bytemuck::bytes_of(&(subscriptions[i].channel)));
+                        ret[i*20usize+8..i*20usize+16].copy_from_slice(bytemuck::bytes_of(&(subscriptions[i].start)));
+                        ret[i*20usize+16..i*20usize+24].copy_from_slice(bytemuck::bytes_of(&(subscriptions[i].end)));
+                    }
+                    write_comm(ret,b'L');
+                    dealloc(ret.as_mut_ptr(), l);
+                    return;
+                } else {
+                    write_err(b"Alloc error");
+                    return;
+                }
+            }
             b'S' => {
                 // Acknowledges the data transfer
-                ack();
                 // Initializes the array of bytes that will hold the packets
                 let byte_list: &mut [u8] = &mut [0; 256];
                 let mut channel = 0;
                 let mut pos = 0;
+                write_console(b"Subscription request received");
+                ack();
                 for i in 0..((length + 255) >> 8) {
                     // Reads bytes from console
                     for byte in &mut *byte_list {
@@ -210,9 +208,6 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                         write_err(err);
                     });
                     ack();
-                    if i == 0 {
-
-                    }
                 }
                 // Test to see if it was actually written
                 let dst = &mut [0; 256];
@@ -227,7 +222,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                 subscriptions[channel as usize] = load_subscription(flash, channel as usize);
 
                 if subscriptions[channel as usize].is_none() {
-                    write_console(b"Failed to load subscription");
+                    write_err(b"Failed to load subscription");
                 } else {
                     write_console(b"Success");
                 }
@@ -281,7 +276,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                     write_comm(b"fail", b'D');
                     return;
                 } else if (sub.unwrap().end <= timestamp) {
-                    write_err(b"too late");
+                    write_err(b"Timestamp is too late");
                     return;
                 }
 
@@ -318,7 +313,10 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                 dealloc(byte_list.as_mut_ptr(),layout);
 
             }
-            _ => return
+            other => {
+                write_err(format!("Unknown opcode: {}", other).as_bytes());
+                return
+            }
         }
 
 
