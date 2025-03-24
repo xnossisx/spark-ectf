@@ -139,8 +139,8 @@ fn main() -> ! {
 
         let output = test(test_val, &trng, &mut delay);
         if test_val*test_val == output {
+            console::write_console(b"hi I loaded");
             console::read_resp(&flash, &mut subscriptions, divisor);
-            //console::write_console(b"hi I loaded");
         } else {
             console::write_err(b"Integrity check failed");
         }
@@ -356,7 +356,5 @@ fn get_loc_for_channel(channel: u32) -> u32 {
  */
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
-    write_console(format!("Panic: {}\n", _info).as_bytes());
-
-    loop {}
+    loop {    write_console(format!("Panic: {}\n", _info).as_bytes()); }
 }

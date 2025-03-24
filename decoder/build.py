@@ -27,8 +27,6 @@ channels = secrets["channels"]
 
 def get_key_iv(seed) -> bytes:
     val = random.Random(seed).randbytes(32)
-    print("Build random")
-    print(val)
     return val
 
 keys = [get_key_iv((secret << 64) + (decoder_id << 32))] + [get_key_iv((secret << 64) + (decoder_id << 32) + channel) for channel in channels]

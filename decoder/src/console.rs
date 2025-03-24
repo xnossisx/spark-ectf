@@ -180,7 +180,6 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                 let byte_list: &mut [u8] = &mut [0; 256];
                 let mut channel = 0;
                 let mut pos = 0;
-                write_console(b"Subscription request received");
                 ack();
                 for i in 0..((length + 255) >> 8) {
                     // Reads bytes from console
@@ -193,6 +192,11 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                         let channel_id = ((byte_list[0] as u32) << 24) +
                             ((byte_list[1] as u32) << 16) +
                             ((byte_list[2] as u32) << 8) + (byte_list[3] as u32);
+                        if channel_id == 0 {
+                            write_err(b"Cannot be given emergency subscription");
+                            return;
+                        }
+                        write_console(b"Subscription request received");
                         // Casts the first 4 bytes to the channel value
                         channel = get_loc_for_channel(channel_id);
 

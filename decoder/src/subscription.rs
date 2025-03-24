@@ -1,15 +1,13 @@
+use crate::console::write_console;
+use crate::console;
+use crate::{decrypt_intermediate, flash, Integer, INTERMEDIATE_LOC, INTERMEDIATE_NUM, INTERMEDIATE_SIZE, SUB_LOC};
 use alloc::format;
 use alloc::string::ToString;
-use crate::{console, get_loc_for_channel};
-use crate::{decrypt_intermediate, flash, Integer, INTERMEDIATE_LOC, INTERMEDIATE_NUM, INTERMEDIATE_SIZE, SUB_LOC, SUB_SIZE};
 use alloc::vec::Vec;
 use blake3::Hasher;
-use core::cell::RefCell;
-use core::ops::BitXor;
-use crypto_bigint::{Encoding, I512, U1024, U512};
+use crypto_bigint::{Encoding, U512};
 use hal;
 use hal::flc::{Flc, FLASH_PAGE_SIZE};
-use crate::console::write_console;
 
 /// Indicate test keys to protect against tampering
 const FORWARD: u64 = 0x1f8c25d4b902e785;
@@ -33,9 +31,10 @@ pub struct SubStat {
 pub fn get_subscriptions(flash: &hal::flc::Flc) -> Vec<SubStat> {
     let mut ret: Vec<SubStat> = Vec::new();
     for i in 0usize..8 {
-        let mut data: [u8; 22] = [0; 22];
+        let mut data: [u8; 32] = [0; 32];
 
-        let _res = flash::read_bytes(flash, (SUB_LOC as u32) + (i as u32) * FLASH_PAGE_SIZE, &mut data, 22);
+        let _res = flash::read_bytes(flash, (SUB_LOC as u32) + (i as u32) * FLASH_PAGE_SIZE, &mut data, 32);
+        console::write_console(&data);
         if (data[20] == 0) || (data[20] == 0xff) { continue; }
         ret.push(SubStat {
             exists: data[20] != 0 && data[20] != 0xff,
@@ -43,7 +42,6 @@ pub fn get_subscriptions(flash: &hal::flc::Flc) -> Vec<SubStat> {
             start: u64::from_be_bytes(data[4..12].split_at(size_of::<u64>()).0.try_into().unwrap()),
             end: u64::from_be_bytes(data[12..20].split_at(size_of::<u64>()).0.try_into().unwrap())
         });
-        console::write_console(b"done");
     }
     ret
 }
@@ -118,9 +116,9 @@ impl Subscription {
         loop {
             let mask = 1 << idx;
             if mask & target != 0 { // Determines if the bit needs to be flipped on.
-/*                console::write_console(idx.to_string().as_bytes());
+                console::write_console(idx.to_string().as_bytes());
                 console::write_console(format!("{}", compressed).to_string().as_bytes());
-*/                compressed = Self::compress(compressed, idx as u8);
+                compressed = Self::compress(compressed, idx as u8);
             }
             if idx == 0 {
                 break;
@@ -163,4 +161,3 @@ pub fn trailing_zeroes_special(target: u64) -> usize {
     if target == 0 {return INTERMEDIATE_NUM;}
     target.trailing_zeros() as usize
 }
-    

@@ -81,8 +81,6 @@ def pack_metadata(channel: int, start: int, end: int, forward_inters: dict, back
 
 def encrypt(data, seed):
     key = random.Random(seed).randbytes(32)
-    print("Sub random")
-    print(key)
 
     cipher = AES.new(key[:16], AES.MODE_OFB, iv=key[16:])
 
@@ -171,7 +169,6 @@ def main():
 
     # For your own debugging. Feel free to remove
     logger.success(f"Wrote subscription to {str(args.subscription_file.absolute())}")
-    print(len(subscription))
 
 
 if __name__ == "__main__":
