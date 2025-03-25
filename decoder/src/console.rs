@@ -129,7 +129,11 @@ pub fn ack() {
 /// @param console: A reference to the UART console.
 pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription>; 9], verifier: VerifyingKey) {
     // Check that the first byte is the magic byte %; otherwise, we return
-    let magic = read_byte();
+    let header: &mut [u8] = &mut [0; 4];
+    for byte in &mut *header {
+        *byte = read_byte();
+    }
+    let magic = header[0];
 
     if magic != MAGIC {
         write_console(b"that was not magic");
@@ -138,7 +142,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
     }
 
     // Reads and checks the validity of the opcode
-    let opcode = read_byte();
+    let opcode = header[1];
     if opcode != b'E' && opcode != b'L' && opcode != b'S' && opcode != b'D' && opcode != b'A' {
         write_console(b"that was not an opcode");
         write_console(&[opcode]);
@@ -146,7 +150,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
     }
 
     // Reads the length value
-    let length: u16 = (read_byte() as u16) + ((read_byte() as u16) << 8);
+    let length: u16 = (header[2] as u16) + ((header[3] as u16) << 8);
     // write_console(b"bonjour");
     unsafe {
         match opcode {
