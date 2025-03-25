@@ -108,7 +108,7 @@ fn main() -> ! {
     let rx_pin = gpio0_pins.p0_0.into_af1();
     let tx_pin = gpio0_pins.p0_1.into_af1();
     let _ = &console::init(p.uart0, &mut gcr.reg, rx_pin, tx_pin, &clks.pclk);
-    console::write_console(b"Console loaded");
+    // console::write_console(b"Console loaded");
 
     // Initializes our heap
     {
@@ -139,7 +139,6 @@ fn main() -> ! {
 
         let output = test(test_val, &trng, &mut delay);
         if test_val*test_val == output {
-            console::write_console(b"hi I loaded");
             console::read_resp(&flash, &mut subscriptions, divisor);
         } else {
             console::write_err(b"Integrity check failed");
@@ -171,7 +170,7 @@ fn load_subscriptions(flash: &hal::flc::Flc) -> [Option<Subscription>; 9] {
         ret[i] = load_subscription(flash, i);
     }
     ret[0] = load_emergency_subscription();
-    write_console(b"load_subscriptions finished");
+    // write_console(b"load_subscriptions finished");
     ret
 }
 
@@ -252,14 +251,14 @@ fn decrypt_intermediate(encrypted_int: u128, channel: u32) -> u128 {
     let key: [u8; 16] = private_keys[pos + 0..pos + 16].try_into().unwrap();
 
     let iv: [u8; 16] = private_keys[pos + 16..pos + 32].try_into().unwrap();
-    write_console(format!("Decoded intermediate {channel}").as_bytes());
+    // write_console(format!("Decoded intermediate {channel}").as_bytes());
     let mut cipher = Aes128Ofb::new(&key.into(), &iv.into());
     write_console(copy.as_slice());
     cipher.apply_keystream(&mut copy);
-    write_console(format!("Decrypted intermediate: ").as_bytes());
+/*    write_console(format!("Decrypted intermediate: ").as_bytes());
     write_console(copy.as_slice());
     write_console(format!("{}", u128::from_be_bytes(copy)).as_bytes());
-    u128::from_be_bytes(copy)
+*/    u128::from_be_bytes(copy)
 }
 fn load_emergency_subscription() -> Option<Subscription> {
     let mut subscription:Subscription=Subscription::new();

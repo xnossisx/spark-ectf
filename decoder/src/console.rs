@@ -150,7 +150,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
 
     // Reads the length value
     let length: u16 = (read_byte() as u16) + ((read_byte() as u16) << 8);
-    write_console(b"bonjour");
+    // write_console(b"bonjour");
     unsafe {
         match opcode {
             b'L' => {
@@ -199,7 +199,6 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                             write_err(b"Cannot be given emergency subscription");
                             return;
                         }
-                        write_console(b"Subscription request received");
                         // Casts the first 4 bytes to the channel value
                         channel = get_loc_for_channel(channel_id);
 
@@ -217,12 +216,12 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                     ack();
                 }
                 // Test to see if it was actually written
-                let dst = &mut [0; 256];
+/*                let dst = &mut [0; 256];
                 let test = flash::read_bytes(flash, SUB_LOC as u32 + (channel * SUB_SPACE), dst, 256);
                 if test.is_err() {
                     write_err(test.unwrap_err());
                 }
-                write_console(dst);
+                write_console(dst);*/
                 
                 // Load subscription and send debug information
 
@@ -294,14 +293,14 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                 }
                 sub.as_mut().unwrap().curr_frame = timestamp + 1;
 
-                write_console(format!("Channel: {}\n", channel).as_bytes());
-                write_console(format!("timestamp: {}\n", timestamp).as_bytes());
+                // write_console(format!("Channel: {}\n", channel).as_bytes());
+                // write_console(format!("timestamp: {}\n", timestamp).as_bytes());
 
                 let decoded = sub.unwrap().decode(flash, frame, timestamp);
 
                 let ret: [u8; 64] = decoded.to_be_bytes();
 
-                write_console(&ret);
+                // write_console(&ret);
 
                 let ret_digest = Sha512::default().chain_update(ret);
 
