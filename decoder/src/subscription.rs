@@ -34,7 +34,7 @@ pub fn get_subscriptions(flash: &hal::flc::Flc) -> Vec<SubStat> {
         let mut data: [u8; 32] = [0; 32];
 
         let _res = flash::read_bytes(flash, (SUB_LOC as u32) + (i as u32) * FLASH_PAGE_SIZE, &mut data, 32);
-        console::write_console(&data);
+        // console::write_console(&data);
         if (data[20] == 0) || (data[20] == 0xff) { continue; }
         ret.push(SubStat {
             exists: data[20] != 0 && data[20] != 0xff,
@@ -87,7 +87,7 @@ impl Subscription {
         let ref_location = ref_location as u32;
         let mut intermediate_buffer: [u8; INTERMEDIATE_SIZE] = [0; INTERMEDIATE_SIZE];
         let _ = flash::read_bytes(flash, ref_location, &mut intermediate_buffer, INTERMEDIATE_SIZE);
-        write_console(format!("Intermediate {}",pos).as_bytes());
+        // write_console(format!("Intermediate {}",pos).as_bytes());
         u128::from_be_bytes(intermediate_buffer)
     }
 
@@ -116,8 +116,8 @@ impl Subscription {
         loop {
             let mask = 1 << idx;
             if mask & target != 0 { // Determines if the bit needs to be flipped on.
-                console::write_console(idx.to_string().as_bytes());
-                console::write_console(format!("{}", compressed).to_string().as_bytes());
+                // console::write_console(idx.to_string().as_bytes());
+                // console::write_console(format!("{}", compressed).to_string().as_bytes());
                 compressed = Self::compress(compressed, idx as u8);
             }
             if idx == 0 {
