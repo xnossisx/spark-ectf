@@ -130,19 +130,22 @@ pub fn ack() {
 pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription>; 9], verifier: VerifyingKey) {
     // Check that the first byte is the magic byte %; otherwise, we return
     let magic = read_byte();
+    let opcode = b'\x00';
+    loop {
+        if magic != MAGIC {
+            write_console(b"that was not magic");
+            write_console(&[magic]);
+            continue;
+        }
 
-    if magic != MAGIC {
-        write_console(b"that was not magic");
-        write_console(&[magic]);
-        return;
-    }
-
-    // Reads and checks the validity of the opcode
-    let opcode = read_byte();
-    if opcode != b'E' && opcode != b'L' && opcode != b'S' && opcode != b'D' && opcode != b'A' {
-        write_console(b"that was not an opcode");
-        write_console(&[opcode]);
-        return;
+        // Reads and checks the validity of the opcode
+        let opcode = read_byte();
+        if opcode != b'E' && opcode != b'L' && opcode != b'S' && opcode != b'D' && opcode != b'A' {
+            write_console(b"that was not an opcode");
+            write_console(&[opcode]);
+            continue;
+        }
+        break;
     }
 
     // Reads the length value
