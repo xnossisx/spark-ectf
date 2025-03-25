@@ -1,4 +1,4 @@
-use crate::{get_loc_for_channel, Integer, SUB_SPACE};
+use crate::{get_loc_for_channel, test, Integer, SUB_SPACE};
 use crate::pac::Uart0;
 use crate::subscription::{get_subscriptions, Subscription};
 use crate::{flash, load_subscription, SUB_LOC};
@@ -9,11 +9,12 @@ use core::alloc::Layout;
 use core::cmp::min;
 use core::mem::MaybeUninit;
 use cortex_m::asm::nop;
-use cortex_m::peripheral::SYST;
+use cortex_m::delay::Delay;
 use ed25519_dalek::{Digest, DigestVerifier, Sha512, Signature, VerifyingKey};
 use hal::gcr::clocks::{Clock, PeripheralClock};
 use hal::gcr::GcrRegisters;
 use hal::gpio::{Af1, Pin};
+use hal::trng::Trng;
 use hal::uart::BuiltUartPeripheral;
 
 static MAGIC: u8 = b'%';
@@ -75,21 +76,11 @@ pub fn write_comm(bytes: &[u8], code: u8) {
     console().write_byte((((bytes.len() as u16) & 0xFF00) >> 8) as u8);
 
     for i in 0..((bytes.len() + 255) >> 8) {
-        while read_byte() != b'\x25' {
-            nop()
-        }
-        console().read_byte();
-        console().read_byte();
-        console().read_byte();
+        eat_ack();
 
         console().write_bytes(&bytes[i<<8..min((i + 1) << 8, bytes.len())]);
     }
-    while read_byte() != b'\x25' {
-        nop()
-    }
-    console().read_byte();
-    console().read_byte();
-    console().read_byte();
+    eat_ack();
 }
 
 /// Writes a properly formatted error message to the console without expecting a response (mostly debug)
@@ -100,7 +91,19 @@ pub fn write_err(bytes: &[u8]) {
     console().write_byte(b'E');
     console().write_byte(((bytes.len() as u16) & 0x00FF) as u8);
     console().write_byte((((bytes.len() as u16) & 0xFF00) >> 8) as u8);
+    eat_ack();
+
     console().write_bytes(bytes);
+    eat_ack();
+}
+
+pub fn eat_ack() {
+    while read_byte() != b'\x25' {
+        nop()
+    }
+    console().read_byte();
+    console().read_byte();
+    console().read_byte();
 }
 
 /// Writes a message to the console without expecting a response
@@ -112,9 +115,7 @@ pub unsafe fn write_async(bytes: &[u8]) {
 /// Sends an ACK signal to the console
 /// @param console: The UART console reference the byte will be received from.
 pub fn read_byte() -> u8 {
-    let res = console().read_byte();
-    // write_console(&[res]);
-    res
+    console().read_byte()
 }
 
 /// Sends an ACK signal to the console
@@ -127,7 +128,7 @@ pub fn ack() {
 /// Reads whatever the TV is sending over right now, and responds to it.
 /// @param subscriptions: A list of subscriptions.
 /// @param console: A reference to the UART console.
-pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription>; 9], verifier: VerifyingKey) {
+pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription>; 9], verifier: VerifyingKey, trng: &Trng, delay: &mut Delay) {
     // Check that the first byte is the magic byte %; otherwise, we return
     let header: &mut [u8] = &mut [0; 4];
     for byte in &mut *header {
@@ -137,7 +138,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
 
     if magic != MAGIC {
         write_console(b"that was not magic");
-        write_console(&[magic]);
+        write_console(header);
         return;
     }
 
@@ -145,13 +146,22 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
     let opcode = header[1];
     if opcode != b'E' && opcode != b'L' && opcode != b'S' && opcode != b'D' && opcode != b'A' {
         write_console(b"that was not an opcode");
-        write_console(&[opcode]);
+        write_console(header);
         return;
     }
 
     // Reads the length value
     let length: u16 = (header[2] as u16) + ((header[3] as u16) << 8);
-    // write_console(b"bonjour");
+    write_console(b"Header received");
+    
+    // Delays to avoid side channel attacks
+    let test_val = trng.gen_u32();
+
+    let output = test(test_val, &trng, delay);
+    if test_val*test_val == output {
+    } else {
+        write_err(b"Integrity check failed");
+    }
     unsafe {
         match opcode {
             b'L' => {
@@ -230,8 +240,6 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
 
                 if subscriptions[channel as usize].is_none() {
                     write_err(b"Failed to load subscription");
-                } else {
-                    write_console(b"Success");
                 }
                 
                 write_comm(b"",b'S');
@@ -268,7 +276,6 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                 for sub_i in subscriptions {
                     if sub_i.is_some() && sub_i.clone().unwrap().channel == channel {
                         sub = Some(sub_i.clone().unwrap());
-                        write_console(b"done");
                         break;
                     }
                 }
@@ -314,20 +321,16 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                     write_err(b"Not the actual frame");
                     return;
                 }
+                dealloc(byte_list.as_mut_ptr(),layout);
 
                 // Return the decoded bytes to the TV
                 write_comm(&ret,b'D');
-                dealloc(byte_list.as_mut_ptr(),layout);
-
             }
             other => {
                 write_err(format!("Unknown opcode: {}", other).as_bytes());
                 return
             }
         }
-
-
-
     }
 }
 

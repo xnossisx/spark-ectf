@@ -4,13 +4,11 @@
 use alloc::format;
 use hal::trng::Trng;
 use core::cell::RefCell;
-use core::ops::Deref;
 use core::panic::PanicInfo;
 use cortex_m::delay::Delay;
 use crypto_bigint::U512;
 use ed25519_dalek::{VerifyingKey};
 use embedded_alloc::LlffHeap;
-use embedded_io::ReadReady;
 
 type Integer = U512;
 
@@ -134,15 +132,8 @@ fn main() -> ! {
 
     // Fundamental event loop
     loop {
-        // Delays to avoid side channel attacks
-        let test_val = trng.gen_u32();
+        console::read_resp(&flash, &mut subscriptions, divisor, &trng, &mut delay);
 
-        let output = test(test_val, &trng, &mut delay);
-        if test_val*test_val == output {
-            console::read_resp(&flash, &mut subscriptions, divisor);
-        } else {
-            console::write_err(b"Integrity check failed");
-        }
     }
 }
 

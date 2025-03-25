@@ -27,7 +27,7 @@ def wind_encoder(root, target):
     for section in range(64, -1, -1):
         mask = 1 << section
         if mask & target > 0:
-            print(section, result)
+            # print(section, result)
             result = compress(result, section)
     return result
 

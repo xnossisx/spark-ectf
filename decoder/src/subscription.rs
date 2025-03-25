@@ -1,8 +1,4 @@
-use crate::console::write_console;
-use crate::console;
 use crate::{decrypt_intermediate, flash, Integer, INTERMEDIATE_LOC, INTERMEDIATE_NUM, INTERMEDIATE_SIZE, SUB_LOC};
-use alloc::format;
-use alloc::string::ToString;
 use alloc::vec::Vec;
 use blake3::Hasher;
 use crypto_bigint::{Encoding, U512};
@@ -75,8 +71,6 @@ impl Subscription {
         if self.location == 0 { // Emergency channel
             let sub_bytes = include_bytes!("emergency.bin");
             let intermediate_pos = INTERMEDIATE_LOC as usize + pos * INTERMEDIATE_SIZE + (if dir == FORWARD {0} else {1024});
-            write_console(b"Getting intermediate...");
-            write_console(&sub_bytes[intermediate_pos..intermediate_pos+16]);
             return u128::from_be_bytes(sub_bytes[intermediate_pos..intermediate_pos+16].try_into().unwrap());
         }
         
@@ -110,7 +104,6 @@ impl Subscription {
 
         let compressed_enc: u128 = self.get_intermediate(&flash, closest_idx, dir);
         let mut compressed= decrypt_intermediate(compressed_enc, self.channel);
-        write_console(compressed.to_string().as_bytes());
         // The number of trailing zeros helps determine what step the intermediate is at! Perfect.
         let mut idx = trailing_zeroes_special(closest_pos) - 1;
         loop {
