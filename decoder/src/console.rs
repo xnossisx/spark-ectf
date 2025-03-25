@@ -1,4 +1,4 @@
-use crate::{get_loc_for_channel, test, Integer, SUB_SPACE};
+use crate::{get_subscription_for_channel, test, Integer, SUB_SPACE};
 use crate::pac::Uart0;
 use crate::subscription::{get_subscriptions, Subscription};
 use crate::{flash, load_subscription, SUB_LOC};
@@ -106,12 +106,6 @@ pub fn eat_ack() {
     console().read_byte();
 }
 
-/// Writes a message to the console without expecting a response
-/// @param console: The UART console reference the message is sent through.
-pub unsafe fn write_async(bytes: &[u8]) {
-    console().write_bytes(&bytes);
-}
-
 /// Sends an ACK signal to the console
 /// @param console: The UART console reference the byte will be received from.
 pub fn read_byte() -> u8 {
@@ -167,7 +161,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
             b'L' => {
                 ack();
                 // Responds to the list command by getting the subscriptions...
-                let subscriptions = get_subscriptions(flash);
+                let subscriptions = get_subscriptions(subscriptions);
                 if let Ok(l) = Layout::from_size_align(4usize + subscriptions.len()*20usize, 16) {
 
                     // Allocating the return space...
@@ -199,10 +193,10 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                     // Reads bytes from console
                     for byte in &mut *byte_list {
                         *byte = read_byte();
-
                     }
-
+                    write_console(b"Read bytes");
                     if i == 0 {
+                        // Casts the first 4 bytes to the channel value
                         let channel_id = ((byte_list[0] as u32) << 24) +
                             ((byte_list[1] as u32) << 16) +
                             ((byte_list[2] as u32) << 8) + (byte_list[3] as u32);
@@ -210,8 +204,17 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                             write_err(b"Cannot be given emergency subscription");
                             return;
                         }
-                        // Casts the first 4 bytes to the channel value
-                        channel = get_loc_for_channel(channel_id);
+                        
+                        // Turns the channel ID into an index
+                        let maybe_channel = get_subscription_for_channel(channel_id, subscriptions);
+                        if maybe_channel.is_none() {
+                            write_err(b"Channel does not exist");
+                            return;
+                        }
+                        channel = maybe_channel.unwrap() - 1; // Push back by one to deal with emergency channel
+                        write_console(format!("Channel: {}", channel).as_bytes());
+                        
+                        // Erases the flash space
 
                         pos = SUB_LOC as u32 + (channel * SUB_SPACE);
                         flash.erase_page(pos).unwrap_or_else(|test| {
@@ -235,7 +238,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                 write_console(dst);*/
                 
                 // Load subscription and send debug information
-
+                
                 subscriptions[channel as usize] = load_subscription(flash, channel as usize);
 
                 if subscriptions[channel as usize].is_none() {
@@ -281,20 +284,21 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                 }
 
                 if sub.is_none() {
+                    write_console(&byte_list[0..4]);
                     write_console(channel.to_string().as_bytes());
                     write_err(b"No channel for this frame!");
                     return;
                 }
 
-                if (sub.unwrap().start > timestamp) {
+                if sub.unwrap().start > timestamp {
                     write_comm(b"fail", b'D');
                     return;
-                } else if (sub.unwrap().end <= timestamp) {
+                } else if sub.unwrap().end <= timestamp {
                     write_err(b"Timestamp is too late");
                     return;
                 }
 
-                if (sub.unwrap().curr_frame > timestamp) {
+                if sub.unwrap().curr_frame > timestamp {
                     write_console(b"Timestamp is out of order!!! This violates security requirement #3. Billions of decoders must fail.");
                     write_comm(b"fail",b'D');
                     return;
@@ -332,8 +336,4 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
             }
         }
     }
-}
-
-pub fn get_range(list: &mut [u8], page: usize, length: u16) -> &mut [u8] {
-    &mut list[page<<8..min((page + 1) << 8, length as usize - (page << 8))]
 }

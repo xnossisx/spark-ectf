@@ -26,7 +26,6 @@ extern crate alloc;
 pub extern crate max7800x_hal as hal;
 extern crate aes as encrypt_aes;
 const SUB_SPACE: u32 = 8192; /* page length */
-const SUB_SIZE: usize = 4+2+64+64+128+8+8+1024+1024;
 const REQUIRED_MEMORY: u32 = 4 + 8 + 8 + 2 + (64 * 8 * 2);
 /* channel # + start + end + length checks + forward key indices + backward key indices */
 
@@ -39,12 +38,10 @@ type Aes128Ofb = ofb::Ofb<encrypt_aes::Aes128>;
 pub 
 
 use hal::entry;
-use hal::flc::{FlashError, FLASH_PAGE_SIZE};
+use hal::flc::{FlashError};
 pub use hal::pac;
-use hal::pac::i2c0::Hsclk;
 use ofb::cipher::{KeyIvInit, StreamCipher};
-use flash::flash;
-use crate::console::write_console;
+use crate::console::{write_console, write_err};
 use crate::subscription::Subscription;
 // you can put a breakpoint on `rust_begin_unwind` to catch panics
 // use panic_itm as _; // logs messages over ITM; requires ITM support
@@ -54,7 +51,7 @@ use crate::subscription::Subscription;
 /**
  * The location of all of our subscription data on the flash
 */
-pub const SUB_LOC: *const u8 = 0x10036000 as *const u8;
+pub const SUB_LOC: *const u8 = 0x10034000 as *const u8;
 
 #[entry]
 fn main() -> ! {
@@ -72,13 +69,7 @@ fn main() -> ! {
 
     // Initialize and split the GPIO0 peripheral into pins
     let gpio0_pins = hal::gpio::Gpio0::new(p.gpio0, &mut gcr.reg).split();
-
-    let pins = hal::gpio::Gpio2::new(p.gpio2, &mut gcr.reg).split();
-
-    let mut led_r = pins.p2_0.into_input_output();
-    let mut led_g = pins.p2_1.into_input_output();
-    let mut led_b = pins.p2_2.into_input_output();
-
+    
     let rate = clks.sys_clk.frequency;
     let mut delay = Delay::new(core.SYST, rate);
     /*led_r.set_power_vddioh();
@@ -115,9 +106,6 @@ fn main() -> ! {
         static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
         unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
     }
-/*  loop {
-        write_console(&[console::read_byte()]);
-    }*/
 
 
     // Initialize the trng peripheral
@@ -127,13 +115,12 @@ fn main() -> ! {
     let flash = flash::init(p.flc, clks);
     let mut subscriptions: [Option<Subscription>; 9] = load_subscriptions(&flash);
     let divisor = load_verification_key();
-    console::write_console(b"Booted up");
+    write_console(b"Booted up");
 
 
     // Fundamental event loop
     loop {
         console::read_resp(&flash, &mut subscriptions, divisor, &trng, &mut delay);
-
     }
 }
 
@@ -143,7 +130,7 @@ fn main() -> ! {
 fn test(scan: u32, trng: &Trng, delay: &mut Delay) -> u32 {
     let ret = scan*scan;
     delay.delay_us(5u32 + (trng.gen_u32() & 511));
-    return ret
+    ret
 }
 
 /**
@@ -157,8 +144,8 @@ fn load_subscriptions(flash: &hal::flc::Flc) -> [Option<Subscription>; 9] {
 
     //let layout = Layout::from_size_align((SUB_SIZE * 8) as usize, 8).unwrap();
     //let mut forward_backward: *mut u8 = alloc(layout);
-    for i in 1usize..get_channels().len() {
-        ret[i] = load_subscription(flash, i);
+    for i in 1usize..9 {
+        ret[i] = load_subscription(flash, i - 1);
     }
     ret[0] = load_emergency_subscription();
     // write_console(b"load_subscriptions finished");
@@ -166,9 +153,9 @@ fn load_subscriptions(flash: &hal::flc::Flc) -> [Option<Subscription>; 9] {
 }
 
 /**
- * Reads a subscription from the flash
+ * Reads a non-emergency subscription from the flash
  * Acts as a wrapper to load_subscription
- * @param channel_pos: A value from 0 to 8
+ * @param channel_pos: A value from 0 to 7
  * @param cons: A reference to the console object
  * @param subscription: A reference to a subscription being loaded
  * @return The success of the operation
@@ -176,7 +163,7 @@ fn load_subscriptions(flash: &hal::flc::Flc) -> [Option<Subscription>; 9] {
 fn load_subscription(flash: &hal::flc::Flc, channel_pos: usize) -> Option<Subscription> {
     let mut subscription : Subscription = Subscription::new();
     let cache: RefCell<[u8; 2048 as usize]> = RefCell::new([0; 2048 as usize]);
-    let mut address: usize = SUB_LOC as usize + (channel_pos * SUB_SPACE as usize);
+    let address: usize = SUB_LOC as usize + (channel_pos * SUB_SPACE as usize);
     let result = flash.check_address(address as u32);
     if result.is_err() {
         match result.unwrap_err() {
@@ -235,7 +222,7 @@ fn load_subscription(flash: &hal::flc::Flc, channel_pos: usize) -> Option<Subscr
 
 fn decrypt_intermediate(encrypted_int: u128, channel: u32) -> u128 {
     // Get the right AES key
-    let channel_pos = get_loc_for_channel(channel);
+    let channel_pos = get_decrypt_loc_for_channel(channel);
     let mut copy = u128::to_be_bytes(encrypted_int);
     let private_keys = include_bytes!("keys.bin");
     let pos = (channel_pos * 32) as usize;
@@ -244,7 +231,7 @@ fn decrypt_intermediate(encrypted_int: u128, channel: u32) -> u128 {
     let iv: [u8; 16] = private_keys[pos + 16..pos + 32].try_into().unwrap();
     // write_console(format!("Decoded intermediate {channel}").as_bytes());
     let mut cipher = Aes128Ofb::new(&key.into(), &iv.into());
-    write_console(copy.as_slice());
+    // write_console(copy.as_slice());
     cipher.apply_keystream(&mut copy);
 /*    write_console(format!("Decrypted intermediate: ").as_bytes());
     write_console(copy.as_slice());
@@ -290,15 +277,8 @@ fn load_emergency_subscription() -> Option<Subscription> {
     Some(subscription)
 }
 
-/**
- * @output The ID of the decoder, as indicated by compilation.
- */
-fn get_id() -> u32 {
-    env!("DECODER_ID").parse::<u32>().unwrap()
-}
-
-pub fn get_channels() -> [u32; 9] {
-    let mut ret: [u32; 9] = [0; 9];
+pub fn get_channels() -> [u32; 17] {
+    let mut ret: [u32; 17] = [0; 17];
     // Get the channels from the environment variable CHANNELS, which is like "1,3,7,8" or something
     let channels = env!("CHANNELS");
     ret[0] = 0;
@@ -320,7 +300,7 @@ pub fn get_channels() -> [u32; 9] {
 fn load_verification_key() -> VerifyingKey {
     let bytes = include_bytes!("public.bin");
     let attempt = VerifyingKey::from_bytes(bytes);
-    if attempt .is_err() {
+    if attempt.is_err() {
         console::write_err(format!("{}", attempt.err().unwrap()).as_bytes());
         panic!();
     }
@@ -330,7 +310,7 @@ fn load_verification_key() -> VerifyingKey {
 * @input The channel ID
 * @output The location of the channel in the actual channel list in flash
 */
-fn get_loc_for_channel(channel: u32) -> u32 {
+fn get_decrypt_loc_for_channel(channel: u32) -> u32 {
     let channels = get_channels();
     for i in 0..channels.len() {
         if channels[i] == channel {
@@ -340,11 +320,27 @@ fn get_loc_for_channel(channel: u32) -> u32 {
     0
 }
 
+fn get_subscription_for_channel(channel: u32, subscriptions: &mut [Option<Subscription>; 9]) -> Option<u32> {
+    for i in 0..subscriptions.len() as u32 {
+        match subscriptions[i as usize] {
+            None => {
+                return Some(i);
+            }
+            Some(sub) => {
+                if sub.channel == channel {
+                    return Some(i);
+                }
+            }
+        }
+    }
+    None
+}
+
 
 /**
  * Allows for simple panicking.
  */
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
-    loop {    write_console(format!("Panic: {}\n", _info).as_bytes()); }
+    loop {    write_err(format!("Panic: {}\n", _info).as_bytes()); }
 }

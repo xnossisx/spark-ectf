@@ -1,43 +1,30 @@
-use crate::{decrypt_intermediate, flash, Integer, INTERMEDIATE_LOC, INTERMEDIATE_NUM, INTERMEDIATE_SIZE, SUB_LOC};
+use crate::{decrypt_intermediate, flash, Integer, INTERMEDIATE_LOC, INTERMEDIATE_NUM, INTERMEDIATE_SIZE};
 use alloc::vec::Vec;
 use blake3::Hasher;
 use crypto_bigint::{Encoding, U512};
 use hal;
-use hal::flc::{Flc, FLASH_PAGE_SIZE};
+use hal::flc::Flc;
 
 /// Indicate test keys to protect against tampering
 const FORWARD: u64 = 0x1f8c25d4b902e785;
 const BACKWARD: u64 = 0xf329d3e6bb90fcc5;
 
-
-// First 64 primes after 1024
-const PRIMES: [u32; 64] = [1031,1033,1039,1049,1051,1061,1063,1069,1087,1091,1093,1097,1103,1109,1117,1123,1129,1151,1153,1163,1171,1181,1187,1193,1201,1213,1217,1223,1229,1231,1237,1249,1259,1277,1279,1283,1289,1291,1297,1301,1303,1307,1319,1321,1327,1361,1367,1373,1381,1399,1409,1423,1427,1429,1433,1439,1447,1451,1453,1459,1471,1481,1483,1487];
-
 /// Represents a subscription listing
 #[derive(Copy)]
 #[derive(Clone)]
 pub struct SubStat {
-    pub(crate) exists: bool,
     pub(crate) channel: u32,
     pub(crate) start: u64,
     pub(crate) end: u64,
 }
 
 /// Loads subscription listings from flash memory
-pub fn get_subscriptions(flash: &hal::flc::Flc) -> Vec<SubStat> {
+pub fn get_subscriptions(subscriptions: &mut [Option<Subscription>; 9]) -> Vec<SubStat> {
     let mut ret: Vec<SubStat> = Vec::new();
-    for i in 0usize..8 {
-        let mut data: [u8; 32] = [0; 32];
-
-        let _res = flash::read_bytes(flash, (SUB_LOC as u32) + (i as u32) * FLASH_PAGE_SIZE, &mut data, 32);
-        // console::write_console(&data);
-        if (data[20] == 0) || (data[20] == 0xff) { continue; }
-        ret.push(SubStat {
-            exists: data[20] != 0 && data[20] != 0xff,
-            channel: u32::from_be_bytes(data[0..4].split_at(size_of::<u32>()).0.try_into().unwrap()),
-            start: u64::from_be_bytes(data[4..12].split_at(size_of::<u64>()).0.try_into().unwrap()),
-            end: u64::from_be_bytes(data[12..20].split_at(size_of::<u64>()).0.try_into().unwrap())
-        });
+    for i in 1usize..9 {
+        let sub = subscriptions[i];
+        if sub.is_none() { continue; }
+        else { ret.push(SubStat { channel: sub.unwrap().channel, start: sub.unwrap().start, end: sub.unwrap().end }); }
     }
     ret
 }
