@@ -270,7 +270,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                 // Return the decoded bytes to the TV
                 match decode_subroutine(flash, subscriptions, verifier, layout, &byte_list) {
                     Some(value) => write_comm(&value,b'D'),
-                    None => return,
+                    None => { },
                 };
                 dealloc(byte_list.as_mut_ptr(), layout);
 
