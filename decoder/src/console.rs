@@ -1,7 +1,6 @@
-use crate::{get_subscription_for_channel, test, Integer, SUB_SPACE};
+use crate::{get_subscription_for_channel, test, Integer, SUB_SPACE, flash, load_subscription, SUB_LOC};
 use crate::pac::Uart0;
 use crate::subscription::{get_subscriptions, Subscription};
-use crate::{flash, load_subscription, SUB_LOC};
 use alloc::alloc::{alloc, dealloc};
 use alloc::format;
 use alloc::string::ToString;
@@ -22,13 +21,11 @@ static MAGIC: u8 = b'%';
 
 pub(crate) type Cons = BuiltUartPeripheral<Uart0, Pin<0, 0, Af1>, Pin<0, 1, Af1>, (), ()>;
 
-// Core reference to our flash (initially uninitialized)
+/// Core reference to our flash (initially uninitialized)
 const CONSOLE_HANDLE: MaybeUninit<Cons> = MaybeUninit::uninit();
 
-/**
- * Gets a reference to the console
- * @output: An immutable console reference
- */
+/// Gets a reference to the console. This is only used after the console is initialized.
+/// @output: An immutable console reference
 pub fn console() -> &'static Cons {
     unsafe { CONSOLE_HANDLE.assume_init_ref() }
 }
@@ -98,6 +95,7 @@ pub fn write_err(bytes: &[u8]) {
     eat_ack();
 }
 
+/// Awaits an ACK message from the UART and reads the following bytes.
 pub fn eat_ack() {
     while read_byte() != b'\x25' {
         nop()
@@ -107,14 +105,14 @@ pub fn eat_ack() {
     console().read_byte();
 }
 
-/// Sends an ACK signal to the console
-/// @param console: The UART console reference the byte will be received from.
+/// Reads a byte from the console, blocking in the meantime.
+/// As it is, this is essentially a shorthand.
+/// @return The byte that is returned.
 pub fn read_byte() -> u8 {
     console().read_byte()
 }
 
-/// Sends an ACK signal to the console
-/// @param console: The UART console reference the ACK is sent through.
+/// Sends an ACK signal to the console.
 pub fn ack() {
     console().write_bytes(b"%A\x00\x00");
 }
@@ -167,7 +165,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                     // Allocating the return space...
                     let ret = core::slice::from_raw_parts_mut(alloc(l), 4usize + subscriptions.len()*20usize);
                     ret[0..4].copy_from_slice(bytemuck::bytes_of(&(subscriptions.len() as u32)));
-                    //ret[0..4] = bytemuck::try_cast(&(subscriptions.len() as u32)).unwrap();
+                    
                     // Casts parts of the subscription data to the listing
                     for i in 0..subscriptions.len() {
                         ret[i*20usize+4..i*20usize+8].copy_from_slice(bytemuck::bytes_of(&(subscriptions[i].channel)));
@@ -229,14 +227,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                     });
                     ack();
                 }
-                // Test to see if it was actually written
-/*                let dst = &mut [0; 256];
-                let test = flash::read_bytes(flash, SUB_LOC as u32 + (channel * SUB_SPACE), dst, 256);
-                if test.is_err() {
-                    write_err(test.unwrap_err());
-                }
-                write_console(dst);*/
-                
+
                 // Load subscription and send debug information
 
                 subscriptions[channel as usize] = load_subscription(flash, channel as usize - 1); // Push back by one to deal with emergency channel
@@ -286,7 +277,9 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
     }
 }
 
-fn decode_subroutine(flash: &Flc, subscriptions: &mut [Option<Subscription>; 9], verifier: VerifyingKey, layout: Layout, byte_list: &&mut [u8]) -> Option<[u8; 64]> {
+fn decode_subroutine(flash: &Flc, subscriptions: &mut [Option<Subscription>; 9], 
+    verifier: VerifyingKey, layout: Layout, byte_list: &&mut [u8]) 
+ -> Option<[u8; 64]> {
     // Splits up the data
     let channel: u32 = u32::from_be_bytes(*&byte_list[0..4].try_into().unwrap());
     let timestamp: u64 = u64::from_be_bytes(*&byte_list[4..12].try_into().unwrap());
@@ -297,6 +290,7 @@ fn decode_subroutine(flash: &Flc, subscriptions: &mut [Option<Subscription>; 9],
     // Get the relevant subscription, and use it to decode
     let mut sub: Option<Subscription> = None;
     for sub_i in subscriptions {
+        // Checks each subscription possibility
         if sub_i.is_some() && sub_i.clone().unwrap().channel == channel {
             sub = Some(sub_i.clone().unwrap());
             break;
@@ -306,9 +300,11 @@ fn decode_subroutine(flash: &Flc, subscriptions: &mut [Option<Subscription>; 9],
     if sub.is_none() {
         write_console(&byte_list[0..4]);
         write_console(channel.to_string().as_bytes());
-        write_err(b"No channel for this frame!");
+        write_err(b"No subscription for this channel!");
         return None;
     }
+
+    // Tests that the subscription is valid
 
     if sub.unwrap().start > timestamp {
         write_comm(b"fail", b'D');
@@ -323,17 +319,15 @@ fn decode_subroutine(flash: &Flc, subscriptions: &mut [Option<Subscription>; 9],
         write_comm(b"fail", b'D');
         return None;
     }
+
+    // Updates the subscription data
     sub.as_mut().unwrap().curr_frame = timestamp + 1;
 
-    // write_console(format!("Channel: {}\n", channel).as_bytes());
-    // write_console(format!("timestamp: {}\n", timestamp).as_bytes());
-
+    // Decodes the encrypted frame
     let decoded = sub.unwrap().decode(flash, frame, timestamp);
-
     let ret: [u8; 64] = decoded.to_be_bytes();
 
-    // write_console(&ret);
-
+    // Verifies that the frame satisfies the signature
     let ret_digest = Sha512::default().chain_update(ret);
 
     let chan_bytes = channel.to_be_bytes();

@@ -15,11 +15,11 @@ pub fn flash() -> &'static hal::flc::Flc {
     unsafe { FLASH_HANDLE.assume_init_ref() }
 }
 
-/**
- * Gets a reference to the flash controller
- * @param p: A flash controller
- * @param clks: The system clock data
- */
+///
+/// Gets a reference to the flash controller
+/// @param p: A flash controller
+/// @param clks: The system clock data
+///
 pub fn init(flc: Flc, clks: SystemClockResults) -> hal::flc::Flc {
     hal::flc::Flc::new(flc, clks.sys_clk)
 }

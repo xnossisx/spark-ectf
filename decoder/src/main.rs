@@ -7,7 +7,7 @@ use core::cell::RefCell;
 use core::panic::PanicInfo;
 use cortex_m::delay::Delay;
 use crypto_bigint::U512;
-use ed25519_dalek::{VerifyingKey};
+use ed25519_dalek::VerifyingKey;
 use embedded_alloc::LlffHeap;
 
 type Integer = U512;
@@ -35,10 +35,9 @@ pub const INTERMEDIATE_SIZE: usize = 16;
 pub const INTERMEDIATE_POS_SIZE: usize = 8;
 
 type Aes128Ofb = ofb::Ofb<encrypt_aes::Aes128>;
-pub 
 
 use hal::entry;
-use hal::flc::{FlashError};
+use hal::flc::{FlashError, Flc};
 pub use hal::pac;
 use ofb::cipher::{KeyIvInit, StreamCipher};
 use crate::console::{write_console, write_err};
@@ -113,6 +112,9 @@ fn main() -> ! {
 
     // Load subscription from flash memory
     let flash = flash::init(p.flc, clks);
+
+    verify_bootloader(&flash);
+
     let mut subscriptions: [Option<Subscription>; 9] = load_subscriptions(&flash);
     let divisor = load_verification_key();
     write_console(b"Booted up");
@@ -134,36 +136,46 @@ fn test(scan: u32, trng: &Trng, delay: &mut Delay) -> u32 {
 }
 
 /**
+ * Reads the bootloader, computes its checksum, and verifies that the program is safe to continue
+ * @param flash: A handle to the flash system
+ * @return The result of the verification
+ * May send out messages.
+ */
+fn verify_bootloader(flash: &Flc) -> Result<Ok, Error> {
+    // Assume that we're working with the attack binary
+
+}
+
+/**
  * Reads all subscriptions from the flash
  * Acts as a wrapper to load_subscription
+ * @param flash: A handle to the flash system
+ * @return A list of possible subscriptions
  */
-fn load_subscriptions(flash: &hal::flc::Flc) -> [Option<Subscription>; 9] {
+fn load_subscriptions(flash: &Flc) -> [Option<Subscription>; 9] {
     // Page 1: Modulus, Channel, Start, End, Forward Count, Backward Count
     // Page 2: Forward exponents, Backward exponents
     let mut ret:[Option<Subscription>; 9] = [None; 9];
 
-    //let layout = Layout::from_size_align((SUB_SIZE * 8) as usize, 8).unwrap();
-    //let mut forward_backward: *mut u8 = alloc(layout);
     for i in 1usize..9 {
         ret[i] = load_subscription(flash, i - 1);
     }
     ret[0] = load_emergency_subscription();
-    // write_console(b"load_subscriptions finished");
     ret
 }
 
-/**
- * Reads a non-emergency subscription from the flash
- * Acts as a wrapper to load_subscription
- * @param channel_pos: A value from 0 to 7
- * @param cons: A reference to the console object
- * @param subscription: A reference to a subscription being loaded
- * @return The success of the operation
- */
-fn load_subscription(flash: &hal::flc::Flc, channel_pos: usize) -> Option<Subscription> {
-    let mut subscription : Subscription = Subscription::new();
-    let cache: RefCell<[u8; 2048 as usize]> = RefCell::new([0; 2048 as usize]);
+/// Reads a non-emergency subscription from the flash
+/// Acts as a wrapper to load_subscription
+/// Reports errors to the console
+/// @param flash: A handle to the flash system
+/// @param channel_pos: A value from 0 to 7 representing an index of the flash memory
+/// @return The potential subscription returned
+fn load_subscription(flash: &Flc, channel_pos: usize) -> Option<Subscription> {
+    let mut subscription: Subscription = Subscription::new();
+    let mut cache: [u8; 2048] = [0u8; 2048];
     let address: usize = SUB_LOC as usize + (channel_pos * SUB_SPACE as usize);
+
+    // Ensures that the address is valid
     let result = flash.check_address(address as u32);
     if result.is_err() {
         match result.unwrap_err() {
@@ -179,44 +191,44 @@ fn load_subscription(flash: &hal::flc::Flc, channel_pos: usize) -> Option<Subscr
         };
         return None
     }
-    unsafe {
-        let _ = flash::read_bytes(flash, address as u32, &mut (*cache.as_ptr()), REQUIRED_MEMORY as usize);
+    let _ = flash::read_bytes(flash, address as u32, &mut cache, REQUIRED_MEMORY as usize);
 
-        let init = (*cache.as_ptr())[20]; // Should always be non-zero if it's loaded right
-        if init == 0 || init == 0xFF {
-            return None;
-        }
-        let mut pos = 0;
-
-        subscription.location = address;
-        subscription.channel=u32::from_be_bytes((*cache.as_ptr())[pos..pos+4].try_into().unwrap());
-        pos += 4;
-
-        subscription.start=u64::from_be_bytes((*cache.as_ptr())[pos..pos+8].try_into().unwrap());
-        pos += 8;
-        subscription.end=u64::from_be_bytes((*cache.as_ptr())[pos..pos+8].try_into().unwrap());
-        pos += 8;
-
-        pos += 2; // Lengths
-
-        for j in 0..64 {
-            let val = u64::from_be_bytes((*cache.as_ptr())[pos + j*8 ..pos + j*8 + 8].try_into().unwrap());
-            if val == 0 && j > 0 {
-                break;
-            }
-            subscription.forward_pos[j] = val;
-        }
-        pos += INTERMEDIATE_POS_SIZE * INTERMEDIATE_NUM;
-
-        for j in 0..64 {
-            let val = u64::from_be_bytes((*cache.as_ptr())[pos + j*8 ..pos + j*8 + 8].try_into().unwrap());
-            if val == 0 && j > 0 {
-                break;
-            }
-            subscription.backward_pos[j] = val;
-        }
+    let init = cache[20]; // Should always be non-zero if it's loaded right
+    if init == 0 || init == 0xFF {
+        return None;
     }
-    drop(cache);
+    let mut pos = 0; // The memory position in the cache
+
+    // Loading subscription data
+    subscription.location = address;
+    subscription.channel=u32::from_be_bytes(cache[pos..pos+4].try_into().unwrap());
+    pos += 4;
+
+    subscription.start=u64::from_be_bytes(cache[pos..pos+8].try_into().unwrap());
+    pos += 8;
+    subscription.end=u64::from_be_bytes(cache[pos..pos+8].try_into().unwrap());
+    pos += 8;
+
+    pos += 2;
+
+    for j in 0..64 {
+        let val = u64::from_be_bytes(cache[pos + j * 8..pos + j * 8 + 8].try_into().unwrap());
+        if val == 0 && j > 0 {
+            break;
+        }
+        subscription.forward_pos[j] = val;
+    }
+    pos += INTERMEDIATE_POS_SIZE * INTERMEDIATE_NUM;
+
+    for j in 0..64 {
+        let val = u64::from_be_bytes(cache[pos + j * 8 ..pos + j * 8 + 8].try_into().unwrap());
+        if val == 0 && j > 0 {
+            break;
+        }
+        subscription.backward_pos[j] = val;
+    }
+
+    // Drops cache to avoid memory leaks
     Some(subscription)
 }
 
@@ -226,17 +238,12 @@ fn decrypt_intermediate(encrypted_int: u128, channel: u32) -> u128 {
     let mut copy = u128::to_be_bytes(encrypted_int);
     let private_keys = include_bytes!("keys.bin");
     let pos = (channel_pos * 32) as usize;
-    let key: [u8; 16] = private_keys[pos + 0..pos + 16].try_into().unwrap();
+    let key: [u8; 16] = private_keys[pos + 0.. pos + 16].try_into().unwrap();
+    let iv: [u8; 16] = private_keys[pos + 16.. pos + 32].try_into().unwrap();
 
-    let iv: [u8; 16] = private_keys[pos + 16..pos + 32].try_into().unwrap();
-    // write_console(format!("Decoded intermediate {channel}").as_bytes());
     let mut cipher = Aes128Ofb::new(&key.into(), &iv.into());
-    // write_console(copy.as_slice());
     cipher.apply_keystream(&mut copy);
-/*    write_console(format!("Decrypted intermediate: ").as_bytes());
-    write_console(copy.as_slice());
-    write_console(format!("{}", u128::from_be_bytes(copy)).as_bytes());
-*/    u128::from_be_bytes(copy)
+    u128::from_be_bytes(copy)
 }
 fn load_emergency_subscription() -> Option<Subscription> {
     let mut subscription:Subscription=Subscription::new();
@@ -277,6 +284,8 @@ fn load_emergency_subscription() -> Option<Subscription> {
     Some(subscription)
 }
 
+/// Gets the list of channels 
+/// @return A list of 17 possible used channels
 pub fn get_channels() -> [u32; 17] {
     let mut ret: [u32; 17] = [0; 17];
     // Get the channels from the environment variable CHANNELS, which is like "1,3,7,8" or something
@@ -294,9 +303,8 @@ pub fn get_channels() -> [u32; 17] {
     ret
 }
 
-/**
-* Loads the verification key for elliptic curve signatures
-*/
+/// Loads the verification key for elliptic curve signatures
+/// @return The verification key
 fn load_verification_key() -> VerifyingKey {
     let bytes = include_bytes!("public.bin");
     let attempt = VerifyingKey::from_bytes(bytes);
@@ -306,10 +314,10 @@ fn load_verification_key() -> VerifyingKey {
     }
     attempt.unwrap()
 }
-/**
-* @input The channel ID
-* @output The location of the channel in the actual channel list in flash
-*/
+
+/// Helps find a subscription in flash
+/// @param channel: The channel ID
+/// @return The location of the channel in the actual channel list in flash
 fn get_decrypt_loc_for_channel(channel: u32) -> u32 {
     let channels = get_channels();
     for i in 0..channels.len() {
@@ -320,6 +328,10 @@ fn get_decrypt_loc_for_channel(channel: u32) -> u32 {
     0
 }
 
+/// Selects the right channel from the subscription list
+/// @param channel: The channel ID.
+/// @param subscriptions: The mutable list of subscriptions.
+/// @return Gives the right position.
 fn get_subscription_for_channel(channel: u32, subscriptions: &mut [Option<Subscription>; 9]) -> Option<u32> {
     for i in 0..subscriptions.len() as u32 {
         match subscriptions[i as usize] {
@@ -337,9 +349,7 @@ fn get_subscription_for_channel(channel: u32, subscriptions: &mut [Option<Subscr
 }
 
 
-/**
- * Allows for simple panicking.
- */
+/// Allows for simple panicking. 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     loop {    write_err(format!("Panic: {}\n", _info).as_bytes()); }
