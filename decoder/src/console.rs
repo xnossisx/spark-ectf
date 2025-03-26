@@ -330,6 +330,9 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                 // Return the decoded bytes to the TV
                 write_comm(&ret,b'D');
             }
+            b'A' => {
+                // Acknowledge
+            }
             other => {
                 write_err(format!("Unknown opcode: {}", other).as_bytes());
                 return
