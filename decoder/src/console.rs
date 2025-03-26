@@ -211,12 +211,12 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                             write_err(b"Channel does not exist");
                             return;
                         }
-                        channel = maybe_channel.unwrap() - 1; // Push back by one to deal with emergency channel
+                        channel = maybe_channel.unwrap();
                         write_console(format!("Channel: {}", channel).as_bytes());
                         
                         // Erases the flash space
 
-                        pos = SUB_LOC as u32 + (channel * SUB_SPACE);
+                        pos = SUB_LOC as u32 + ((channel - 1) * SUB_SPACE); // Push back by one to deal with emergency channel
                         flash.erase_page(pos).unwrap_or_else(|test| {
                             write_err(flash::map_err(test).as_bytes());
                         });
@@ -239,7 +239,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                 
                 // Load subscription and send debug information
                 
-                subscriptions[channel as usize] = load_subscription(flash, channel as usize);
+                subscriptions[channel as usize] = load_subscription(flash, channel as usize - 1); // Push back by one to deal with emergency channel
 
                 if subscriptions[channel as usize].is_none() {
                     write_err(b"Failed to load subscription");
