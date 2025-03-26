@@ -11,6 +11,7 @@ use core::mem::MaybeUninit;
 use cortex_m::asm::nop;
 use cortex_m::delay::Delay;
 use ed25519_dalek::{Digest, DigestVerifier, Sha512, Signature, VerifyingKey};
+use hal::flc::Flc;
 use hal::gcr::clocks::{Clock, PeripheralClock};
 use hal::gcr::GcrRegisters;
 use hal::gpio::{Af1, Pin};
@@ -146,7 +147,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
 
     // Reads the length value
     let length: u16 = (header[2] as u16) + ((header[3] as u16) << 8);
-    
+
     // Delays to avoid side channel attacks
     let test_val = trng.gen_u32();
 
@@ -203,7 +204,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                             write_err(b"Cannot be given emergency subscription");
                             return;
                         }
-                        
+
                         // Turns the channel ID into an index
                         let maybe_channel = get_subscription_for_channel(channel_id, subscriptions);
                         if maybe_channel.is_none() {
@@ -212,7 +213,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                         }
                         channel = maybe_channel.unwrap();
                         write_console(format!("Channel: {}", channel).as_bytes());
-                        
+
                         // Erases the flash space
 
                         pos = SUB_LOC as u32 + ((channel - 1) * SUB_SPACE); // Push back by one to deal with emergency channel
@@ -237,7 +238,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                 write_console(dst);*/
                 
                 // Load subscription and send debug information
-                
+
                 subscriptions[channel as usize] = load_subscription(flash, channel as usize - 1); // Push back by one to deal with emergency channel
 
                 if subscriptions[channel as usize].is_none() {
@@ -265,70 +266,14 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                     }
                     ack();
                 }
-                write_console(&byte_list[0..8]);
-
-                // Splits up the data
-                let channel: u32 = u32::from_be_bytes(*&byte_list[0..4].try_into().unwrap());
-                let timestamp: u64 = u64::from_be_bytes(*&byte_list[4..12].try_into().unwrap());
-                let frame: Integer = <crate::Integer>::from_be_slice(&byte_list[76..140]); // 64 bytes
-                let signature: Signature = Signature::from_slice(&byte_list[12..76]).unwrap();
-                //let checksum: u32 = u32::from_be_bytes(*&byte_list[140..144].try_into().unwrap());
-
-                // Get the relevant subscription, and use it to decode
-                let mut sub: Option<Subscription> = None;
-                for sub_i in subscriptions {
-                    if sub_i.is_some() && sub_i.clone().unwrap().channel == channel {
-                        sub = Some(sub_i.clone().unwrap());
-                        break;
-                    }
-                }
-
-                if sub.is_none() {
-                    write_console(&byte_list[0..4]);
-                    write_console(channel.to_string().as_bytes());
-                    write_err(b"No channel for this frame!");
-                    return;
-                }
-
-                if sub.unwrap().start > timestamp {
-                    write_comm(b"fail", b'D');
-                    return;
-                } else if sub.unwrap().end <= timestamp {
-                    write_err(b"Timestamp is too late");
-                    return;
-                }
-
-                if sub.unwrap().curr_frame > timestamp {
-                    write_console(b"Timestamp is out of order!!! This violates security requirement #3. Billions of decoders must fail.");
-                    write_comm(b"fail",b'D');
-                    return;
-                }
-                sub.as_mut().unwrap().curr_frame = timestamp + 1;
-
-                // write_console(format!("Channel: {}\n", channel).as_bytes());
-                // write_console(format!("timestamp: {}\n", timestamp).as_bytes());
-
-                let decoded = sub.unwrap().decode(flash, frame, timestamp);
-
-                let ret: [u8; 64] = decoded.to_be_bytes();
-
-                // write_console(&ret);
-
-                let ret_digest = Sha512::default().chain_update(ret);
-
-                let chan_bytes = channel.to_be_bytes();
-                let verifier_context = verifier.with_context(&chan_bytes).unwrap();
-                let evaluation = verifier_context.verify_digest(ret_digest, &signature);
-
-                if evaluation.is_err() {
-                    write_console(b"Key verification failed - frame spoofing may be happening!");
-                    write_err(b"Not the actual frame");
-                    return;
-                }
+                
+                // Return the decoded bytes to the TV
+                match decode_subroutine(flash, subscriptions, verifier, layout, &byte_list) {
+                    Some(value) => write_comm(&value,b'D'),
+                    None => return,
+                };
                 dealloc(byte_list.as_mut_ptr(), layout);
 
-                // Return the decoded bytes to the TV
-                write_comm(&ret,b'D');
             }
             b'A' => {
                 // Acknowledge
@@ -339,4 +284,66 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
             }
         }
     }
+}
+
+fn decode_subroutine(flash: &Flc, subscriptions: &mut [Option<Subscription>; 9], verifier: VerifyingKey, layout: Layout, byte_list: &&mut [u8]) -> Option<[u8; 64]> {
+    // Splits up the data
+    let channel: u32 = u32::from_be_bytes(*&byte_list[0..4].try_into().unwrap());
+    let timestamp: u64 = u64::from_be_bytes(*&byte_list[4..12].try_into().unwrap());
+    let frame: Integer = <crate::Integer>::from_be_slice(&byte_list[76..140]); // 64 bytes
+    let signature: Signature = Signature::from_slice(&byte_list[12..76]).unwrap();
+    //let checksum: u32 = u32::from_be_bytes(*&byte_list[140..144].try_into().unwrap());
+
+    // Get the relevant subscription, and use it to decode
+    let mut sub: Option<Subscription> = None;
+    for sub_i in subscriptions {
+        if sub_i.is_some() && sub_i.clone().unwrap().channel == channel {
+            sub = Some(sub_i.clone().unwrap());
+            break;
+        }
+    }
+
+    if sub.is_none() {
+        write_console(&byte_list[0..4]);
+        write_console(channel.to_string().as_bytes());
+        write_err(b"No channel for this frame!");
+        return None;
+    }
+
+    if sub.unwrap().start > timestamp {
+        write_comm(b"fail", b'D');
+        return None;
+    } else if sub.unwrap().end <= timestamp {
+        write_err(b"Timestamp is too late");
+        return None;
+    }
+
+    if sub.unwrap().curr_frame > timestamp {
+        write_console(b"Timestamp is out of order!!! This violates security requirement #3. Billions of decoders must fail.");
+        write_comm(b"fail", b'D');
+        return None;
+    }
+    sub.as_mut().unwrap().curr_frame = timestamp + 1;
+
+    // write_console(format!("Channel: {}\n", channel).as_bytes());
+    // write_console(format!("timestamp: {}\n", timestamp).as_bytes());
+
+    let decoded = sub.unwrap().decode(flash, frame, timestamp);
+
+    let ret: [u8; 64] = decoded.to_be_bytes();
+
+    // write_console(&ret);
+
+    let ret_digest = Sha512::default().chain_update(ret);
+
+    let chan_bytes = channel.to_be_bytes();
+    let verifier_context = verifier.with_context(&chan_bytes).unwrap();
+    let evaluation = verifier_context.verify_digest(ret_digest, &signature);
+
+    if evaluation.is_err() {
+        write_console(b"Key verification failed - frame spoofing may be happening!");
+        write_err(b"Not the actual frame");
+        return None;
+    }
+    Some(ret)
 }
