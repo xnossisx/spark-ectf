@@ -146,7 +146,6 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
 
     // Reads the length value
     let length: u16 = (header[2] as u16) + ((header[3] as u16) << 8);
-    write_console(b"Header received");
     
     // Delays to avoid side channel attacks
     let test_val = trng.gen_u32();
@@ -266,6 +265,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                     }
                     ack();
                 }
+                write_console(&byte_list[0..8]);
 
                 // Splits up the data
                 let channel: u32 = u32::from_be_bytes(*&byte_list[0..4].try_into().unwrap());
@@ -325,7 +325,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                     write_err(b"Not the actual frame");
                     return;
                 }
-                dealloc(byte_list.as_mut_ptr(),layout);
+                dealloc(byte_list.as_mut_ptr(), layout);
 
                 // Return the decoded bytes to the TV
                 write_comm(&ret,b'D');
