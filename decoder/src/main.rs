@@ -3,7 +3,6 @@
 
 use alloc::format;
 use hal::trng::Trng;
-use core::cell::RefCell;
 use core::panic::PanicInfo;
 use blake3::Hasher;
 use cortex_m::delay::Delay;
@@ -79,6 +78,7 @@ fn main() -> ! {
     let rx_pin = gpio0_pins.p0_0.into_af1();
     let tx_pin = gpio0_pins.p0_1.into_af1();
     let _ = &console::init(p.uart0, &mut gcr.reg, rx_pin, tx_pin, &clks.pclk);
+    console::write_console(b"Loaded");
 
     // Initializes the heap
     {
@@ -97,7 +97,6 @@ fn main() -> ! {
     
     let mut subscriptions: [Option<Subscription>; 9]= [None; 9];
     let mut verifier: VerifyingKey = Default::default();
-
     // Makes successful execution conditional on correct data
     if verify_bootloader(&flash, &mut delay) {
         // Load subscriptions and verifying key
@@ -180,10 +179,10 @@ fn verify_bootloader(flash: &Flc, delay: &mut Delay) -> bool {
     }
     // Otherwise, we have to conclude that the bootloader is invalid, so we prevent the decoder from getting the necessary subscriptions
     if eq == 2 {
-        write_err(&output);
-        write_console(b"bootloader verify failed");
-
-        return false
+        loop {
+            write_console(b"bootloader verify failed");
+            write_err(&output);
+        }
     }
     true
 }
