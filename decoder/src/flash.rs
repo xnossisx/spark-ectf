@@ -7,30 +7,27 @@ use crate::pac::Flc;
 // Core reference to our flash (initially uninitialized)
 const FLASH_HANDLE: MaybeUninit<hal::flc::Flc> = MaybeUninit::uninit();
 
-/**
- * Gets a reference to the flash controller
- * @output: An immutable flash controller reference
- */
+
+/// Gets a reference to the flash controller
+/// @return An immutable flash controller reference
 pub fn flash() -> &'static hal::flc::Flc {
     unsafe { FLASH_HANDLE.assume_init_ref() }
 }
 
-///
-/// Gets a reference to the flash controller
-/// @param p: A flash controller
-/// @param clks: The system clock data
-///
-pub fn init(flc: Flc, clks: SystemClockResults) -> hal::flc::Flc {
-    hal::flc::Flc::new(flc, clks.sys_clk)
+/// Creates the flash controller
+/// @param p A flash controller
+/// @param clks The system clock data
+pub fn init(flc: Flc, clks: SystemClockResults) {
+    let ret = hal::flc::Flc::new(flc, clks.sys_clk);
+    FLASH_HANDLE.write(ret);
 }
 
-///
 /// Reads bytes from the flash memory
-/// @param p: A flash controller
-/// @param clks: The system clock data
-/// @param len: The size of the bytes to be read
-/// @output: An error message or nothing
-///
+/// @param fsh A flash controller
+/// @param frm The address of the bytes to be read
+/// @param dst The reference to the data's destination
+/// @param len The size of the bytes to be read
+/// @return An error message or nothing on success
 pub fn read_bytes<'a>(fsh: &hal::flc::Flc, frm: u32, dst: &mut [u8], len: usize) -> Result<(), &'a[u8]> {
     // Checks that the slice has enough space
     if dst.len() < len {
@@ -59,10 +56,11 @@ pub fn read_bytes<'a>(fsh: &hal::flc::Flc, frm: u32, dst: &mut [u8], len: usize)
 }
 
 /// Writes bytes to the flash
-/// dst: A u32 representing the start address of the write location in flash memory
-/// from: The slice of bytes being written
-/// len: The length of the bytes that will be written
-pub fn write_bytes<'a>(fsh: &hal::flc::Flc, dst: u32, from: &[u8], len: usize) -> Result<(), &'a [u8]> {
+/// @param dst A u32 representing the start address of the write location in flash memory
+/// @param from The slice of bytes being written
+/// @param len The length of the bytes that will be written
+/// @return Either nothing, or the error message
+pub fn write_bytes<'a>(dst: u32, from: &[u8], len: usize) -> Result<(), &'a [u8]> {
     if from.len() < len {
         return Err(b"FlashError::LowSpace");
     }
@@ -77,19 +75,20 @@ pub fn write_bytes<'a>(fsh: &hal::flc::Flc, dst: u32, from: &[u8], len: usize) -
         unsafe {
             // Performs write
             let bytes: [u32; 4]  = *((from.as_ptr() as usize + i * 16) as *const [u32; 4]);
-            let res = fsh.write_128(addr_128_ptr, &bytes);
+            let res = flash().write_128(addr_128_ptr, &bytes);
             // Checks for errors
             if res.is_err() {
                 return Err(map_err(res.unwrap_err()).as_bytes());
             }
         }
     }
-
-
+    
     Ok(())
 }
 
-/// Converts flash errors into string messages
+/// Converts flash errors into string messages for write_bytes
+/// @param err A flash error
+/// @return The corresponding error message
 pub fn map_err(err: FlashError) -> &'static str {
     match err {
         FlashError::InvalidAddress => "FlashError::InvalidAddress",

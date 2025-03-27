@@ -21,7 +21,6 @@ static HEAP: Heap = Heap::empty();
 mod console;
 mod flash;
 mod subscription;
-//mod uart;
 
 extern crate alloc;
 pub extern crate max7800x_hal as hal;
@@ -43,20 +42,15 @@ pub use hal::pac;
 use ofb::cipher::{KeyIvInit, StreamCipher};
 use crate::console::{write_console, write_err};
 use crate::subscription::Subscription;
-// you can put a breakpoint on `rust_begin_unwind` to catch panics
-// use panic_itm as _; // logs messages over ITM; requires ITM support
-// use panic_semihosting as _; // logs messages to the host stderr; requires a debugger
-// use cortex_m_semihosting::heprintln; // uncomment to use this for printing through semihosting
 
-/**
- * The location of all of our subscription data on the flash
-*/
+
+// The location of all of our subscription data on the flash
 pub const SUB_LOC: *const u8 = 0x10034000 as *const u8;
 
 #[entry]
 fn main() -> ! {
 
-    // Initialize peripherals
+    // Initialize peripherals, general control registers, oscillator, and clocks
     let p = pac::Peripherals::take().unwrap();
     let core = pac::CorePeripherals::take().unwrap();
     let mut gcr = hal::gcr::Gcr::new(p.gcr, p.lpgcr);
@@ -69,37 +63,24 @@ fn main() -> ! {
 
     // Initialize and split the GPIO0 peripheral into pins
     let gpio0_pins = hal::gpio::Gpio0::new(p.gpio0, &mut gcr.reg).split();
-    
+    let pins = hal::gpio::Gpio2::new(p.gpio2, &mut gcr.reg).split();
+    // Initialize a delay resource
     let rate = clks.sys_clk.frequency;
     let mut delay = Delay::new(core.SYST, rate);
-    /*led_r.set_power_vddioh();
+    let mut led_r = pins.p2_0.into_input_output();
+    let mut led_g = pins.p2_1.into_input_output();led_r.set_power_vddioh();
+    led_r.set_power_vddioh();
     led_g.set_power_vddioh();
-    led_b.set_power_vddioh();
-    // Initialize a delay timer using the ARM SYST (SysTick) peripheral
-
-
-    // LED blink loop
-    {
-        led_r.set_high();
-        delay.delay_ms(500);
-        led_g.set_high();
-        delay.delay_ms(500);
-        led_b.set_high();
-        delay.delay_ms(500);
-        led_r.set_low();
-        delay.delay_ms(500);
-        led_g.set_low();
-        delay.delay_ms(500);
-        led_b.set_low();
-        delay.delay_ms(500);
-    }*/
+    //Spark!
+    led_r.set_high();
+    led_g.set_high();
+    
     // Configure UART to host computer with 115200 8N1 settings
     let rx_pin = gpio0_pins.p0_0.into_af1();
     let tx_pin = gpio0_pins.p0_1.into_af1();
     let _ = &console::init(p.uart0, &mut gcr.reg, rx_pin, tx_pin, &clks.pclk);
-    // console::write_console(b"Console loaded");
 
-    // Initializes our heap
+    // Initializes the heap
     {
         use core::mem::MaybeUninit;
         const HEAP_SIZE: usize = 2048;
@@ -107,34 +88,36 @@ fn main() -> ! {
         unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
     }
 
-
-    // Initialize the TRNG peripheral
+    // Initialize the TRNG (True Random Number Generator) peripheral
     let trng = Trng::new(p.trng, &mut gcr.reg);
 
-    // Load subscription from flash memory
-    let flash = flash::init(p.flc, clks);
-
-
+    // Initialize the flash controller
+    flash::init(p.flc, clks);
+    let flash = flash::flash();
+    
     let mut subscriptions: [Option<Subscription>; 9]= [None; 9];
-    let mut divisor: VerifyingKey = Default::default();
+    let mut verifier: VerifyingKey = Default::default();
 
     // Makes successful execution conditional on correct data
     if verify_bootloader(&flash, &mut delay) {
+        // Load subscriptions and verifying key
         subscriptions = load_subscriptions(&flash);
-        divisor = load_verification_key();
+        verifier = load_verification_key();
     } else {
         write_console(b"WARNING: Output may be invalid");
     }
 
     // Fundamental event loop
     loop {
-        console::read_resp(&flash, &mut subscriptions, divisor, &trng, &mut delay);
+        // Handle console logic
+        console::read_resp(&flash, &mut subscriptions, verifier, &trng, &mut delay);
     }
 }
 
-/**
- * Likely to be exposed to data corruption, thereby allowing us to detect interference
- */
+/// This function is used where the risk of serious data corruption is high, thereby allowing us to detect interference
+/// @param trng A reference to the TRNG resource
+/// @param delay A reference to a delay resource, used to give time for attacks to disrupt the data
+/// @return A value indicating success or failure
 pub fn test(trng: &Trng, delay: &mut Delay) -> bool {
     let test_val = trng.gen_u32();
 
@@ -149,6 +132,7 @@ pub fn test(trng: &Trng, delay: &mut Delay) -> bool {
 }
 
 /// Subroutine that performs the delayed calculation
+/// Refer to pub fn test
 fn test_2(scan: u32, trng: &Trng, delay: &mut Delay) -> u32 {
     let ret = scan.clone();
     delay.delay_us(5u32 + (trng.gen_u32() & 255));
@@ -156,16 +140,13 @@ fn test_2(scan: u32, trng: &Trng, delay: &mut Delay) -> u32 {
 }
 
 const ATTK_SIGNATURE: [u8;32] = [0u8;32];
-
 const INSE_SIGNATURE: [u8;32] = [b'0',0xcc,0x13,0xa9,0x19,0x81,0x98,b'$',0xd9,b'\n',0xb8,b'+',0xd1,0xc8,0xc3,b'c',
     0x1a,b's',0xda,b'f',0xdd,0xc2,b'U',b'T',0xe3,b']',0xc2,0xc5,b't',b'k',0x9a,0xf5];
-
-/**
- * Reads the bootloader, computes its checksum, and verifies that the program is safe to continue
- * @param flash: A handle to the flash system
- * @return The result of the verification
- * May send out messages.
- */
+ 
+/// Reads the bootloader, computes its checksum, and verifies that the program is safe to continue
+/// @param flash A handle to the flash system
+/// @return The result of the verification
+/// May send out messages.
 fn verify_bootloader(flash: &Flc, delay: &mut Delay) -> bool {
     // Assume that we're working with the attack binary
     let mut blake_hash = Hasher::new();
@@ -181,12 +162,14 @@ fn verify_bootloader(flash: &Flc, delay: &mut Delay) -> bool {
     blake_hash.update(data.as_ref());
     let mut eq: u8 = 0;
     let output = blake_hash.finalize().as_bytes().clone();
+    // Check if the output is equal to the attacker.bin checksum
     for i in 0..output.len() {
         if output[i] != ATTK_SIGNATURE[i] {
             eq += 1;
             break;
         }
     }
+    // Check if the output is equal to the insecure.bin checksum
     if eq == 1 {
         for i in 0..output.len() {
             if output[i] != INSE_SIGNATURE[i] {
@@ -195,6 +178,7 @@ fn verify_bootloader(flash: &Flc, delay: &mut Delay) -> bool {
             }
         }
     }
+    // Otherwise, we have to conclude that the bootloader is invalid, so we prevent the decoder from getting the necessary subscriptions
     if eq == 2 {
         write_err(&output);
         write_console(b"bootloader verify failed");
@@ -204,12 +188,11 @@ fn verify_bootloader(flash: &Flc, delay: &mut Delay) -> bool {
     true
 }
 
-/**
- * Reads all subscriptions from the flash
- * Acts as a wrapper to load_subscription
- * @param flash: A handle to the flash system
- * @return A list of possible subscriptions
- */
+
+///Reads all subscriptions from the flash
+///Acts as a wrapper to load_subscription
+///@param flash A handle to the flash system
+///@return A list of possible subscriptions
 fn load_subscriptions(flash: &Flc) -> [Option<Subscription>; 9] {
     // Page 1: Modulus, Channel, Start, End, Forward Count, Backward Count
     // Page 2: Forward exponents, Backward exponents
@@ -225,9 +208,9 @@ fn load_subscriptions(flash: &Flc) -> [Option<Subscription>; 9] {
 /// Reads a non-emergency subscription from the flash
 /// Acts as a wrapper to load_subscription
 /// Reports errors to the console
-/// @param flash: A handle to the flash system
-/// @param channel_pos: A value from 0 to 7 representing an index of the flash memory
-/// @return The potential subscription returned
+/// @param flash A handle to the flash system
+/// @param channel_pos A value from 0 to 7 representing an index of the flash memory
+/// @return The potential subscription now loaded into memory
 fn load_subscription(flash: &Flc, channel_pos: usize) -> Option<Subscription> {
     let mut subscription: Subscription = Subscription::new();
     let mut cache: [u8; 2048] = [0u8; 2048];
@@ -290,19 +273,29 @@ fn load_subscription(flash: &Flc, channel_pos: usize) -> Option<Subscription> {
     Some(subscription)
 }
 
+/// Converts an intermediate in flash to the actual intermediate using AES
+/// @param encrypted_int The encrypted intermediate
+/// @param channel The channel ID of the intermediate
+/// @return The decrypted intermediate
 fn decrypt_intermediate(encrypted_int: u128, channel: u32) -> u128 {
-    // Get the right AES key
+    // Get the right AES key by getting the right channel
     let channel_pos = get_decrypt_loc_for_channel(channel);
     let mut copy = u128::to_be_bytes(encrypted_int);
     let private_keys = include_bytes!("keys.bin");
     let pos = (channel_pos * 32) as usize;
+    
+    // Separate out the different parts of the key
     let key: [u8; 16] = private_keys[pos + 0.. pos + 16].try_into().unwrap();
     let iv: [u8; 16] = private_keys[pos + 16.. pos + 32].try_into().unwrap();
 
+    // Initialize the cipher, decode the key, and return it
     let mut cipher = Aes128Ofb::new(&key.into(), &iv.into());
     cipher.apply_keystream(&mut copy);
     u128::from_be_bytes(copy)
 }
+
+/// Loads the one emergency subscription from program memory
+/// @return The emergency subscription, if it's valid, else None
 fn load_emergency_subscription() -> Option<Subscription> {
     let mut subscription:Subscription=Subscription::new();
     let cache = include_bytes!("emergency.bin");
@@ -374,7 +367,7 @@ fn load_verification_key() -> VerifyingKey {
 }
 
 /// Helps find a subscription in flash
-/// @param channel: The channel ID
+/// @param channel The channel ID
 /// @return The location of the channel in the actual channel list in flash
 fn get_decrypt_loc_for_channel(channel: u32) -> u32 {
     let channels = get_channels();
