@@ -5,6 +5,7 @@ use alloc::format;
 use hal::trng::Trng;
 use core::cell::RefCell;
 use core::panic::PanicInfo;
+use blake3::Hasher;
 use cortex_m::delay::Delay;
 use crypto_bigint::U512;
 use ed25519_dalek::VerifyingKey;
@@ -101,24 +102,29 @@ fn main() -> ! {
     // Initializes our heap
     {
         use core::mem::MaybeUninit;
-        const HEAP_SIZE: usize = 4096;
+        const HEAP_SIZE: usize = 2048;
         static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
         unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
     }
 
 
-    // Initialize the trng peripheral
+    // Initialize the TRNG peripheral
     let trng = Trng::new(p.trng, &mut gcr.reg);
 
     // Load subscription from flash memory
     let flash = flash::init(p.flc, clks);
 
-    verify_bootloader(&flash);
 
-    let mut subscriptions: [Option<Subscription>; 9] = load_subscriptions(&flash);
-    let divisor = load_verification_key();
-    write_console(b"Booted up");
+    let mut subscriptions: [Option<Subscription>; 9]= [None; 9];
+    let mut divisor: VerifyingKey = Default::default();
 
+    // Makes successful execution conditional on correct data
+    if verify_bootloader(&flash, &mut delay) {
+        subscriptions = load_subscriptions(&flash);
+        divisor = load_verification_key();
+    } else {
+        write_console(b"WARNING: Output may be invalid");
+    }
 
     // Fundamental event loop
     loop {
@@ -129,11 +135,30 @@ fn main() -> ! {
 /**
  * Likely to be exposed to data corruption, thereby allowing us to detect interference
  */
-fn test(scan: u32, trng: &Trng, delay: &mut Delay) -> u32 {
-    let ret = scan*scan;
-    delay.delay_us(5u32 + (trng.gen_u32() & 511));
-    ret
+pub fn test(trng: &Trng, delay: &mut Delay) -> bool {
+    let test_val = trng.gen_u32();
+
+    let output = test_2(test_val, &trng, delay);
+    if test_val * test_val == output {
+        true
+    } else {
+        write_err(b"Integrity check failed");
+        delay.delay_ms(4500);
+        false
+    }
 }
+
+/// Subroutine that performs the delayed calculation
+fn test_2(scan: u32, trng: &Trng, delay: &mut Delay) -> u32 {
+    let ret = scan.clone();
+    delay.delay_us(5u32 + (trng.gen_u32() & 255));
+    ret*ret
+}
+
+const ATTK_SIGNATURE: [u8;32] = [0u8;32];
+
+const INSE_SIGNATURE: [u8;32] = [b'0',0xcc,0x13,0xa9,0x19,0x81,0x98,b'$',0xd9,b'\n',0xb8,b'+',0xd1,0xc8,0xc3,b'c',
+    0x1a,b's',0xda,b'f',0xdd,0xc2,b'U',b'T',0xe3,b']',0xc2,0xc5,b't',b'k',0x9a,0xf5];
 
 /**
  * Reads the bootloader, computes its checksum, and verifies that the program is safe to continue
@@ -141,9 +166,42 @@ fn test(scan: u32, trng: &Trng, delay: &mut Delay) -> u32 {
  * @return The result of the verification
  * May send out messages.
  */
-fn verify_bootloader(flash: &Flc) -> Result<Ok, Error> {
+fn verify_bootloader(flash: &Flc, delay: &mut Delay) -> bool {
     // Assume that we're working with the attack binary
+    let mut blake_hash = Hasher::new();
+    let mut data: [u8; 2048]=[0; 2048];
+    if flash.check_address(0x10000000).is_err() {
+        write_err(b"bootloader verify failed - can't read");
+        return false
+    }
+    let res = flash::read_bytes(flash,0x10000000, &mut data, 2048);
+    if res.is_err() {
+        write_err(res.err().unwrap());
+    }
+    blake_hash.update(data.as_ref());
+    let mut eq: u8 = 0;
+    let output = blake_hash.finalize().as_bytes().clone();
+    for i in 0..output.len() {
+        if output[i] != ATTK_SIGNATURE[i] {
+            eq += 1;
+            break;
+        }
+    }
+    if eq == 1 {
+        for i in 0..output.len() {
+            if output[i] != INSE_SIGNATURE[i] {
+                eq += 1;
+                break;
+            }
+        }
+    }
+    if eq == 2 {
+        write_err(&output);
+        write_console(b"bootloader verify failed");
 
+        return false
+    }
+    true
 }
 
 /**

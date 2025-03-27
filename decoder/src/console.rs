@@ -85,14 +85,7 @@ pub fn write_comm(bytes: &[u8], code: u8) {
 /// @param console: The UART console reference the message is sent through.
 /// @param bytes: The list of bytes sent through.
 pub fn write_err(bytes: &[u8]) {
-    console().write_byte(MAGIC);
-    console().write_byte(b'E');
-    console().write_byte(((bytes.len() as u16) & 0x00FF) as u8);
-    console().write_byte((((bytes.len() as u16) & 0xFF00) >> 8) as u8);
-    eat_ack();
-
-    console().write_bytes(bytes);
-    eat_ack();
+    write_comm(bytes, b'E');
 }
 
 /// Awaits an ACK message from the UART and reads the following bytes.
@@ -146,19 +139,16 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
     // Reads the length value
     let length: u16 = (header[2] as u16) + ((header[3] as u16) << 8);
 
-    // Delays to avoid side channel attacks
-    let test_val = trng.gen_u32();
-
-    let output = test(test_val, &trng, delay);
-    if test_val*test_val == output {
-    } else {
-        write_err(b"Integrity check failed");
-    }
     unsafe {
         match opcode {
             b'L' => {
                 ack();
                 // Responds to the list command by getting the subscriptions...
+                // Delays to avoid side channel attacks
+                if !test(&trng, delay) {
+                    write_comm(b"\x00\x00\x00\x00",b'L');
+                    return;
+                }
                 let subscriptions = get_subscriptions(subscriptions);
                 if let Ok(l) = Layout::from_size_align(4usize + subscriptions.len()*20usize, 16) {
 
@@ -192,9 +182,12 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                     for byte in &mut *byte_list {
                         *byte = read_byte();
                     }
-                    write_console(b"Read bytes");
                     if i == 0 {
                         // Casts the first 4 bytes to the channel value
+                        if !test(&trng, delay) {
+                            write_comm(b"",b'S');
+                            return;
+                        }
                         let channel_id = ((byte_list[0] as u32) << 24) +
                             ((byte_list[1] as u32) << 16) +
                             ((byte_list[2] as u32) << 8) + (byte_list[3] as u32);
@@ -210,7 +203,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                             return;
                         }
                         channel = maybe_channel.unwrap();
-                        write_console(format!("Channel: {}", channel).as_bytes());
+                        //write_console(format!("Channel: {}", channel).as_bytes());
 
                         // Erases the flash space
 
@@ -222,6 +215,10 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                         pos += 256;
                     }
                     // Writes data to the flash
+                    if !test(&trng, delay) {
+                        write_comm(b"",b'S');
+                        return;
+                    }
                     flash::write_bytes(flash, pos, &byte_list, 256).unwrap_or_else(|err| {
                         write_err(err);
                     });
@@ -257,9 +254,12 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                     }
                     ack();
                 }
-                
+                if !test(&trng, delay) {
+                    write_comm(b"",b'D');
+                    return;
+                }
                 // Return the decoded bytes to the TV
-                match decode_subroutine(flash, subscriptions, verifier, layout, &byte_list) {
+                match decode_subroutine(flash, subscriptions, verifier, layout, &byte_list, trng, delay) {
                     Some(value) => write_comm(&value,b'D'),
                     None => { },
                 };
@@ -278,7 +278,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
 }
 
 fn decode_subroutine(flash: &Flc, subscriptions: &mut [Option<Subscription>; 9], 
-    verifier: VerifyingKey, layout: Layout, byte_list: &&mut [u8]) 
+    verifier: VerifyingKey, layout: Layout, byte_list: &&mut [u8], trng: &Trng, delay: &mut Delay)
  -> Option<[u8; 64]> {
     // Splits up the data
     let channel: u32 = u32::from_be_bytes(*&byte_list[0..4].try_into().unwrap());
@@ -322,7 +322,10 @@ fn decode_subroutine(flash: &Flc, subscriptions: &mut [Option<Subscription>; 9],
 
     // Updates the subscription data
     sub.as_mut().unwrap().curr_frame = timestamp + 1;
-
+    if !test(&trng, delay) {
+        write_comm(b"",b'D');
+        return Some([0u8;64]);
+    }
     // Decodes the encrypted frame
     let decoded = sub.unwrap().decode(flash, frame, timestamp);
     let ret: [u8; 64] = decoded.to_be_bytes();
@@ -331,6 +334,10 @@ fn decode_subroutine(flash: &Flc, subscriptions: &mut [Option<Subscription>; 9],
     let ret_digest = Sha512::default().chain_update(ret);
 
     let chan_bytes = channel.to_be_bytes();
+    if !test(&trng, delay) {
+        write_comm(b"",b'D');
+        return Some([0u8;64]);
+    }
     let verifier_context = verifier.with_context(&chan_bytes).unwrap();
     let evaluation = verifier_context.verify_digest(ret_digest, &signature);
 
