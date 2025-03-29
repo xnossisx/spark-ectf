@@ -34,6 +34,8 @@ rustflags = [
 # target = "thumbv7em-none-eabi"       # Cortex-M4 and Cortex-M7 (no FPU)
 target = "thumbv7em-none-eabihf"     # Cortex-M4F and Cortex-M7F (with FPU)
 target-dir = "./target"
+[rust]
+all-targets = false
 
 # target = "thumbv8m.base-none-eabi"   # Cortex-M23
 # target = "thumbv8m.main-none-eabi"   # Cortex-M33 (no FPU)

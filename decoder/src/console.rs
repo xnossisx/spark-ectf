@@ -1,6 +1,7 @@
-use crate::{get_subscription_for_channel, test, Integer, SUB_SPACE, flash, load_subscription, SUB_LOC};
+use crate::{get_subscription_for_channel, test, Integer, SUB_SPACE};
 use crate::pac::Uart0;
 use crate::subscription::{get_subscriptions, Subscription};
+use crate::{flash, load_subscription, SUB_LOC};
 use alloc::alloc::{alloc, dealloc};
 use alloc::format;
 use alloc::string::ToString;
@@ -21,7 +22,7 @@ static MAGIC: u8 = b'%';
 
 pub(crate) type Cons = BuiltUartPeripheral<Uart0, Pin<0, 0, Af1>, Pin<0, 1, Af1>, (), ()>;
 
-/// Core reference to our flash (initially uninitialized)
+// Core reference to our flash (initially uninitialized)
 const CONSOLE_HANDLE: MaybeUninit<Cons> = MaybeUninit::uninit();
 
 /// Gets a reference to the console. This is only used after the console is initialized.
@@ -109,7 +110,7 @@ pub fn ack() {
 /// Reads whatever the TV is sending over right now, and responds to it.
 /// @param subscriptions: A list of subscriptions.
 /// @param console: A reference to the UART console.
-pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription>; 9], verifier: VerifyingKey, trng: &Trng, delay: &mut Delay) {
+pub fn read_resp(flc: &Flc, subscriptions: &mut [Option<Subscription>; 9], verifier: VerifyingKey, trng: &Trng, delay: &mut Delay) {
     // Check that the first byte is the magic byte %; otherwise, we return
     let header: &mut [u8] = &mut [0; 4];
     for byte in &mut *header {
@@ -133,7 +134,6 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
 
     // Reads the length value
     let length: u16 = (header[2] as u16) + ((header[3] as u16) << 8);
-
     unsafe {
         match opcode {
             // LISTING
@@ -194,36 +194,37 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                             return;
                         }
 
-                        // Turns the channel ID into an possible index
+                        // Turns the channel ID into a possible index
                         let maybe_channel = get_subscription_for_channel(channel_id, subscriptions);
                         if maybe_channel.is_none() {
                             write_err(b"Channel does not exist");
                             return;
                         }
                         channel = maybe_channel.unwrap();
+                        write_console(format!("Channel: {}", channel).as_bytes());
 
                         // Erases the flash space
                         pos = SUB_LOC as u32 + ((channel - 1) * SUB_SPACE); // Push back by one to deal with emergency channel
-                        flash.erase_page(pos).unwrap_or_else(|test| {
+                        flc.erase_page(pos).unwrap_or_else(|test| {
                             write_err(flash::map_err(test).as_bytes());
                         });
                     } else {
                         pos += 256;
                     }
-                    // This is a good example of reliability testing.
+                    // This is a good example of the reliability testing we're doing.
                     if !test(&trng, delay) {
                         write_comm(b"",b'S');
                         return;
                     }
                     // Writes data to the flash
-                    flash::write_bytes(pos, &byte_list, 256).unwrap_or_else(|err| {
+                    flash::write_bytes(flc, pos, &byte_list, 256).unwrap_or_else(|err| {
                         write_err(err);
                     });
                     ack();
                 }
 
                 // Load subscription and send confirmation/error
-                subscriptions[channel as usize] = load_subscription(flash, channel as usize - 1); // Push back by one to deal with emergency channel
+                subscriptions[channel as usize] = load_subscription(flc, channel as usize - 1); // Push back by one to deal with emergency channel
                 if subscriptions[channel as usize].is_none() {
                     write_err(b"Failed to load subscription");
                 }
@@ -256,7 +257,7 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
                 }
 
                 // Create and return the decoded bytes to the TV (if they exist) and deallocate the byte list
-                match decode_subroutine(flash, subscriptions, verifier, &byte_list, trng, delay) {
+                match decode_subroutine(flc, subscriptions, verifier, &byte_list, trng, delay) {
                     Some(value) => write_comm(&value,b'D'),
                     None => { },
                 };
@@ -282,20 +283,19 @@ pub fn read_resp(flash: &hal::flc::Flc, subscriptions: &mut [Option<Subscription
 /// @param trng The TRNG resource
 /// @param delay The delay resource
 /// @return Either the successfully decoded frame or nothing
-fn decode_subroutine(flash: &Flc, subscriptions: &mut [Option<Subscription>; 9],
+fn decode_subroutine(flc: &Flc, subscriptions: &mut [Option<Subscription>; 9],
     verifier: VerifyingKey, byte_list: &&mut [u8], trng: &Trng, delay: &mut Delay)
  -> Option<[u8; 64]> {
     // Splits up the data
     let channel: u32 = u32::from_be_bytes(*&byte_list[0..4].try_into().unwrap());
     let timestamp: u64 = u64::from_be_bytes(*&byte_list[4..12].try_into().unwrap());
-    let frame: Integer = <crate::Integer>::from_be_slice(&byte_list[76..140]); // 64 bytes
-    let signature: Signature = Signature::from_slice(&byte_list[12..76]).unwrap();
-    //let checksum: u32 = u32::from_be_bytes(*&byte_list[140..144].try_into().unwrap());
+    let signature: Signature = Signature::from_slice(&byte_list[12..76]).unwrap(); // 64 bytes
+    let frame = <crate::Integer>::from_be_slice(&byte_list[76..140]); // 64 bytes
 
     // Get the relevant subscription, and use it to decode
     let mut sub: Option<Subscription> = None;
     for sub_i in subscriptions {
-        // Checks each subscription possibility
+        // Checks over each Option<Subscription>
         if sub_i.is_some() && sub_i.clone().unwrap().channel == channel {
             sub = Some(sub_i.clone().unwrap());
             break;
@@ -310,7 +310,6 @@ fn decode_subroutine(flash: &Flc, subscriptions: &mut [Option<Subscription>; 9],
     }
 
     // Tests that the subscription is valid
-
     if sub.unwrap().start > timestamp {
         write_comm(b"fail", b'D');
         return None;
@@ -333,9 +332,17 @@ fn decode_subroutine(flash: &Flc, subscriptions: &mut [Option<Subscription>; 9],
     }
     
     // Decodes the encrypted frame
-    let decoded = sub.unwrap().decode(flash, frame, timestamp);
+    let random = trng.gen_u32();
+    let ans = random*random;
+    
+    let decoded = sub.unwrap().decode(flc, frame, timestamp);
     let ret: [u8; 64] = decoded.to_be_bytes();
-
+    
+    if random*random != ans {
+        write_comm(b"", b'D');
+        return Some([0u8;64]);
+    }
+    
     // Verifies that the frame satisfies the signature by running ED25519 on the hashed frame
     let ret_digest = Sha512::default().chain_update(ret);
 
@@ -349,7 +356,7 @@ fn decode_subroutine(flash: &Flc, subscriptions: &mut [Option<Subscription>; 9],
 
     if evaluation.is_err() {
         write_console(b"Key verification failed - frame spoofing may be happening!");
-        write_err(b"Not the actual frame");
+        write_err(&ret);
         return None;
     }
     Some(ret)

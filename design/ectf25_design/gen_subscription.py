@@ -1,5 +1,5 @@
 """
-Author: Samuel Lipsutz
+Author: Eric & Samuel Lipsutz
 Date: 2025
 """
 
@@ -7,12 +7,12 @@ import argparse
 import json
 from pathlib import Path
 import random
-from loguru import logger
 from blake3 import blake3
 from Crypto.Cipher import AES
 
 
 # Hashes it with Blake3
+# Like with the original
 def compress(n, section):
     compressed = int.from_bytes(blake3(section.to_bytes(1, byteorder="big")).update(n.to_bytes(16, byteorder="big")).digest()) & (2 ** 128 - 1)
     return compressed
@@ -22,20 +22,21 @@ def wind_encoder(root, target):
     result = root
     for section in range(64, -1, -1):
         mask = 1 << section
-        if mask & target > 0:
+        if mask & target != 0:
             result = compress(result, section)
     return result
-            
+
+# Gets the next required intermediate position from start.
+# This will be the start time with the smallest 1 bit added out.
 def next_required_intermediate(start):
     complement = 0
     for section in range(64, -1, -1):
-        # Round up the range
         bit = 1 << section
-        if bit & start > 0:
+        if bit & start != 0:
             complement = bit
     return start + complement
 
-
+# Generates all intermediates for a start and end timestamp, based on a root key.
 def get_intermediates(start, end, root):
     intermediates = {}
     if start == 0:
@@ -48,6 +49,7 @@ def get_intermediates(start, end, root):
             break
     return intermediates
 
+# Encrypts and stores intermediates, in the same order as their positions.
 def pack_intermediates(intermediates: dict, secret: int):
     _res = b""
     positions = sorted(intermediates.keys())
@@ -59,6 +61,7 @@ def pack_intermediates(intermediates: dict, secret: int):
         _res += b"\x00"
     return _res
 
+# Packs the intermediate references/positions (they are sorted, as you can see.)
 def pack_inter_positions(intermediates: dict):
     _res = b""
     positions = sorted(intermediates.keys())
@@ -69,6 +72,7 @@ def pack_inter_positions(intermediates: dict):
         _res += b"\x00"
     return _res
 
+# Stores all the metadata for the subscription, including the channels, the timestamps, and the intermediate positions and lengths.
 def pack_metadata(channel: int, start: int, end: int, forward_inters: dict, backward_inters: dict):
     _res = channel.to_bytes(4, byteorder='big') + \
         start.to_bytes(8, byteorder='big') + end.to_bytes(8, byteorder='big') + \
@@ -79,11 +83,10 @@ def pack_metadata(channel: int, start: int, end: int, forward_inters: dict, back
         _res += b"\x00"
     return _res
 
+# Encrypts the data on the subscription as to avoid piracy
 def encrypt(data, seed):
     key = random.Random(seed).randbytes(32)
-
     cipher = AES.new(key[:16], AES.MODE_OFB, iv=key[16:])
-
     return cipher.encrypt(data)
 
 def gen_subscription(
@@ -156,20 +159,9 @@ def main():
         args.secrets_file.read(), args.device_id, args.start, args.end, args.channel
     )
 
-    # Print the generated subscription for your own debugging
-    # Attackers will NOT have access to the output of this (although they may have
-    # subscriptions in certain scenarios), but feel free to remove
-    #
-    # NOTE: Printing sensitive data is generally not good security practice
-    logger.debug(f"Generated subscription: {subscription}")
-
     # Open the file, erroring if the file exists unless the --force arg is provided
     with open(args.subscription_file, "wb" if args.force else "xb") as f:
         f.write(subscription)
-
-    # For your own debugging. Feel free to remove
-    logger.success(f"Wrote subscription to {str(args.subscription_file.absolute())}")
-
 
 if __name__ == "__main__":
     main()

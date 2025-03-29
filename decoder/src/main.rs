@@ -21,6 +21,7 @@ static HEAP: Heap = Heap::empty();
 mod console;
 mod flash;
 mod subscription;
+//mod uart;
 
 extern crate alloc;
 pub extern crate max7800x_hal as hal;
@@ -37,7 +38,7 @@ pub const INTERMEDIATE_POS_SIZE: usize = 8;
 type Aes128Ofb = ofb::Ofb<encrypt_aes::Aes128>;
 
 use hal::entry;
-use hal::flc::{FlashError, Flc};
+use hal::flc::{FlashError};
 pub use hal::pac;
 use ofb::cipher::{KeyIvInit, StreamCipher};
 use crate::console::{write_console, write_err};
@@ -45,7 +46,7 @@ use crate::subscription::Subscription;
 
 
 // The location of all of our subscription data on the flash
-pub const SUB_LOC: *const u8 = 0x10034000 as *const u8;
+pub const SUB_LOC: *const u8 = 0x10036000 as *const u8;
 
 #[entry]
 fn main() -> ! {
@@ -91,26 +92,14 @@ fn main() -> ! {
     // Initialize the TRNG (True Random Number Generator) peripheral
     let trng = Trng::new(p.trng, &mut gcr.reg);
 
-    // Initialize the flash controller
-    flash::init(p.flc, clks);
-    let flash = flash::flash();
-    
-    let mut subscriptions: [Option<Subscription>; 9]= [None; 9];
-    let mut verifier: VerifyingKey = Default::default();
-
-    // Makes successful execution conditional on correct data
-    if verify_bootloader(&flash, &mut delay) {
-        // Load subscriptions and verifying key
-        subscriptions = load_subscriptions(&flash);
-        verifier = load_verification_key();
-    } else {
-        write_console(b"WARNING: Output may be invalid");
-    }
+    // Load subscription from flash memory
+    let flash = flash::init(p.flc, clks);
+    let mut subscriptions: [Option<Subscription>; 9] = load_subscriptions(&flash);
+    let divisor = load_verification_key();
 
     // Fundamental event loop
     loop {
-        // Handle console logic
-        console::read_resp(&flash, &mut subscriptions, verifier, &trng, &mut delay);
+        console::read_resp(&flash, &mut subscriptions, divisor, &trng, &mut delay);
     }
 }
 
@@ -120,7 +109,6 @@ fn main() -> ! {
 /// @return A value indicating success or failure
 pub fn test(trng: &Trng, delay: &mut Delay) -> bool {
     let test_val = trng.gen_u32();
-
     let output = test_2(test_val, &trng, delay);
     if test_val * test_val == output {
         true
@@ -132,74 +120,24 @@ pub fn test(trng: &Trng, delay: &mut Delay) -> bool {
 }
 
 /// Subroutine that performs the delayed calculation
-/// Refer to pub fn test
+/// Refer to pub fn test just above this
 fn test_2(scan: u32, trng: &Trng, delay: &mut Delay) -> u32 {
     let ret = scan.clone();
     delay.delay_us(5u32 + (trng.gen_u32() & 255));
     ret*ret
 }
 
-const ATTK_SIGNATURE: [u8;32] = [0u8;32];
-const INSE_SIGNATURE: [u8;32] = [b'0',0xcc,0x13,0xa9,0x19,0x81,0x98,b'$',0xd9,b'\n',0xb8,b'+',0xd1,0xc8,0xc3,b'c',
-    0x1a,b's',0xda,b'f',0xdd,0xc2,b'U',b'T',0xe3,b']',0xc2,0xc5,b't',b'k',0x9a,0xf5];
- 
-/// Reads the bootloader, computes its checksum, and verifies that the program is safe to continue
-/// @param flash A handle to the flash system
-/// @return The result of the verification
-/// May send out messages.
-fn verify_bootloader(flash: &Flc, delay: &mut Delay) -> bool {
-    // Assume that we're working with the attack binary
-    let mut blake_hash = Hasher::new();
-    let mut data: [u8; 2048]=[0; 2048];
-    if flash.check_address(0x10000000).is_err() {
-        write_err(b"bootloader verify failed - can't read");
-        return false
-    }
-    let res = flash::read_bytes(flash,0x10000000, &mut data, 2048);
-    if res.is_err() {
-        write_err(res.err().unwrap());
-    }
-    blake_hash.update(data.as_ref());
-    let mut eq: u8 = 0;
-    let output = blake_hash.finalize().as_bytes().clone();
-    // Check if the output is equal to the attacker.bin checksum
-    for i in 0..output.len() {
-        if output[i] != ATTK_SIGNATURE[i] {
-            eq += 1;
-            break;
-        }
-    }
-    // Check if the output is equal to the insecure.bin checksum
-    if eq == 1 {
-        for i in 0..output.len() {
-            if output[i] != INSE_SIGNATURE[i] {
-                eq += 1;
-                break;
-            }
-        }
-    }
-    // Otherwise, we have to conclude that the bootloader is invalid, so we prevent the decoder from getting the necessary subscriptions
-    if eq == 2 {
-        write_err(&output);
-        write_console(b"bootloader verify failed");
-
-        return false
-    }
-    true
-}
-
-
 ///Reads all subscriptions from the flash
 ///Acts as a wrapper to load_subscription
 ///@param flash A handle to the flash system
 ///@return A list of possible subscriptions
-fn load_subscriptions(flash: &Flc) -> [Option<Subscription>; 9] {
+fn load_subscriptions(flc: &hal::flc::Flc) -> [Option<Subscription>; 9] {
     // Page 1: Modulus, Channel, Start, End, Forward Count, Backward Count
     // Page 2: Forward exponents, Backward exponents
     let mut ret:[Option<Subscription>; 9] = [None; 9];
 
     for i in 1usize..9 {
-        ret[i] = load_subscription(flash, i - 1);
+        ret[i] = load_subscription(flc,i - 1);
     }
     ret[0] = load_emergency_subscription();
     ret
@@ -211,65 +149,66 @@ fn load_subscriptions(flash: &Flc) -> [Option<Subscription>; 9] {
 /// @param flash A handle to the flash system
 /// @param channel_pos A value from 0 to 7 representing an index of the flash memory
 /// @return The potential subscription now loaded into memory
-fn load_subscription(flash: &Flc, channel_pos: usize) -> Option<Subscription> {
+fn load_subscription(flc: &hal::flc::Flc, channel_pos: usize) -> Option<Subscription> {
     let mut subscription: Subscription = Subscription::new();
-    let mut cache: [u8; 2048] = [0u8; 2048];
+    let cache: RefCell<[u8; 2048 as usize]> = RefCell::new([0; 2048 as usize]);
     let address: usize = SUB_LOC as usize + (channel_pos * SUB_SPACE as usize);
 
     // Ensures that the address is valid
-    let result = flash.check_address(address as u32);
+    let result = flc.check_address(address as u32);
     if result.is_err() {
         match result.unwrap_err() {
             FlashError::InvalidAddress => {
-                console::write_err(b"InvalidAddress\n");
+                write_err(b"InvalidAddress\n");
             }
             FlashError::AccessViolation => {
-                console::write_err(b"InvalidOperation\n");
+                write_err(b"InvalidOperation\n");
             }
             FlashError::NeedsErase => {
-                console::write_err(b"NeedsErase\n");
+                write_err(b"NeedsErase\n");
             }
         };
         return None
     }
-    let _ = flash::read_bytes(flash, address as u32, &mut cache, REQUIRED_MEMORY as usize);
+    unsafe {
+        let _ = flash::read_bytes(flc, address as u32, &mut (*cache.as_ptr()), REQUIRED_MEMORY as usize);
 
-    let init = cache[20]; // Should always be non-zero if it's loaded right
-    if init == 0 || init == 0xFF {
-        return None;
-    }
-    let mut pos = 0; // The memory position in the cache
-
-    // Loading subscription data
-    subscription.location = address;
-    subscription.channel=u32::from_be_bytes(cache[pos..pos+4].try_into().unwrap());
-    pos += 4;
-
-    subscription.start=u64::from_be_bytes(cache[pos..pos+8].try_into().unwrap());
-    pos += 8;
-    subscription.end=u64::from_be_bytes(cache[pos..pos+8].try_into().unwrap());
-    pos += 8;
-
-    pos += 2;
-
-    for j in 0..64 {
-        let val = u64::from_be_bytes(cache[pos + j * 8..pos + j * 8 + 8].try_into().unwrap());
-        if val == 0 && j > 0 {
-            break;
+        let init = (*cache.as_ptr())[20]; // Should always be non-zero if it's loaded right
+        if init == 0 || init == 0xFF {
+            write_console(b"SubscriptionError");
+            return None;
         }
-        subscription.forward_pos[j] = val;
-    }
-    pos += INTERMEDIATE_POS_SIZE * INTERMEDIATE_NUM;
+        let mut pos = 0;
 
-    for j in 0..64 {
-        let val = u64::from_be_bytes(cache[pos + j * 8 ..pos + j * 8 + 8].try_into().unwrap());
-        if val == 0 && j > 0 {
-            break;
+        subscription.location = address;
+        subscription.channel=u32::from_be_bytes((*cache.as_ptr())[pos..pos+4].try_into().unwrap());
+        pos += 4;
+
+        subscription.start=u64::from_be_bytes((*cache.as_ptr())[pos..pos+8].try_into().unwrap());
+        pos += 8;
+        subscription.end=u64::from_be_bytes((*cache.as_ptr())[pos..pos+8].try_into().unwrap());
+        pos += 8;
+
+        pos += 2; // Lengths
+
+        for j in 0..64 {
+            let val = u64::from_be_bytes((*cache.as_ptr())[pos + j*8 ..pos + j*8 + 8].try_into().unwrap());
+            if val == 0 && j > 0 {
+                break;
+            }
+            subscription.forward_pos[j] = val;
         }
-        subscription.backward_pos[j] = val;
-    }
+        pos += INTERMEDIATE_POS_SIZE * INTERMEDIATE_NUM;
 
-    // Drops cache to avoid memory leaks
+        for j in 0..64 {
+            let val = u64::from_be_bytes((*cache.as_ptr())[pos + j*8 ..pos + j*8 + 8].try_into().unwrap());
+            if val == 0 && j > 0 {
+                break;
+            }
+            subscription.backward_pos[j] = val;
+        }
+    }
+    drop(cache);
     Some(subscription)
 }
 

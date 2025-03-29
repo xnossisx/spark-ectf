@@ -35,10 +35,11 @@ def gen_secrets(channels: list[int]) -> bytes:
     channels.append(0)  # Add the broadcast channel
     secrets["channels"] = channels
 
-
+    # For helping encrypt subscriptions
     secrets["systemsecret"] = rsa.randnum.read_random_int(64)
-    # For frame encoding
+    # For frame verification
     curve = ECC.generate(curve='Ed25519') # Randomness included
+    # Private signature key and public signature key
     secrets["private"] = curve.export_key(format='PEM', protection='PBKDF2WithHMAC-SHA512AndAES128-CBC')
     secrets["public"] = curve.public_key().export_key(format='PEM')
 
@@ -46,8 +47,7 @@ def gen_secrets(channels: list[int]) -> bytes:
 
     for channel in channels:
         secrets[channel] = {}
-
-
+        # These are just hashed, so their values don't really have any significance
         secrets[channel]["forward"] = rsa.randnum.read_random_int(128)
         secrets[channel]["backward"] = rsa.randnum.read_random_int(128)
 
@@ -105,10 +105,6 @@ def main():
     with open(args.secrets_file, "wb" if args.force else "xb") as f:
         # Dump the secrets to the file
         f.write(secrets)
-
-    # For your own debugging. Feel free to remove
-    logger.success(f"Wrote secrets to {str(args.secrets_file.absolute())}")
-
 
 if __name__ == "__main__":
     main()

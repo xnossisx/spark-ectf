@@ -1,9 +1,6 @@
 """
-Author: Garrick Schinkel
+Authors: Eric Lipsutz, Samuel Lipsutz
 Date: 2025
-
-
-
 """
 
 import argparse
@@ -16,18 +13,17 @@ from Crypto.PublicKey import ECC
 from Crypto.Signature import eddsa
 from Crypto.Hash import SHA512 
 
-# Hashes it with Blake3
+# Hashes the value and the bit section, and then takes the lowest 128 bits
 def compress(n, section):
     compressed = int.from_bytes(blake3(section.to_bytes(1, byteorder="big")).update(n.to_bytes(16, byteorder="big")).digest()) & (2 ** 128 - 1)
     return compressed
 
-
+# Compresses the root for each section starting from highest to lowest
 def wind_encoder(root, target):
     result = root
     for section in range(64, -1, -1):
         mask = 1 << section
-        if mask & target > 0:
-            # print(section, result)
+        if mask & target != 0:
             result = compress(result, section)
     return result
 
@@ -76,6 +72,7 @@ class Encoder:
         # TODO: encode the satellite frames so that they meet functional and
         #  security requirements
 
+        # Used for handling backwards keys
         end_of_time = 2**64 - 1
 
         if self.channel_cache != channel or (timestamp & self.cache_mask) != self.cached_timestamp:
@@ -87,18 +84,19 @@ class Encoder:
             self.cached_forward = wind_encoder(forward_root, self.cached_timestamp)
             self.cached_backward = wind_encoder(backward_root, (end_of_time - self.cached_timestamp) & self.cache_mask)
 
+        # Obtains the correct forward/backward keys, using caching to make things simpler in the typical sequential use case
         extra = timestamp & ~self.cache_mask
-        # print(self.secrets[str(channel)]["forward"],  self.secrets[str(channel)]["backward"])
         forward = wind_encoder(self.cached_forward, extra)
         backward = wind_encoder(self.cached_backward, (end_of_time & ~self.cache_mask) - extra)
-        # print(hex(forward), hex(backward))
-        
-        guard = ((forward ^ backward) * 0x5CF481FFE6F11B408D66FFF23E5AB827B33DE52A2B3CECB41151001328ED091FBE600B23F21FBF327BB013A8267590805548377BAFDEBB6C467AF95F56AF3AE7) % (2 ** 512)
 
-        # print(hex(guard))
+        # Combines the keys with another hash and XOR
+        guard_pre = forward ^ backward
+        hasher = 0x5CF481FFE6F11B408D66FFF23E5AB827B33DE52A2B3CECB41151001328ED091FBE600B23F21FBF327BB013A8267590805548377BAFDEBB6C467AF95F56AF3AE7
+        hasher_1 = int.from_bytes(blake3(guard_pre.to_bytes(64, "big")).update(hasher.to_bytes(64, "big")).digest(64), "big")
+        guard = hasher_1
 
         signature = eddsa.new(key=self.signer, mode='rfc8032', context=channel.to_bytes(4)).sign(SHA512.new(frame))
-        # print(hex((guard ^ int.from_bytes(frame))))
+        # Timestamp + signature + the frame XORed with the key combination
         return struct.pack(">IQ", channel, timestamp) + signature + (guard ^ int.from_bytes(frame)).to_bytes(64)
 
 
