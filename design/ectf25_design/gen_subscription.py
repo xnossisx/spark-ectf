@@ -17,7 +17,8 @@ def compress(n, section):
     compressed = int.from_bytes(blake3(section.to_bytes(1, byteorder="big")).update(n.to_bytes(16, byteorder="big")).digest()) & (2 ** 128 - 1)
     return compressed
 
-
+# Performs a sequence of hashes on root depending on the value of target.
+# In particular, when target has a bit in the nth position, the root will be hashed with n during the (64-n)th iteration.
 def wind_encoder(root, target):
     result = root
     for section in range(64, -1, -1):
@@ -29,14 +30,15 @@ def wind_encoder(root, target):
 # Gets the next required intermediate position from start.
 # This will be the start time with the smallest 1 bit added out.
 def next_required_intermediate(start):
-    complement = 0
-    for section in range(64, -1, -1):
+    for section in range(64):
         bit = 1 << section
         if bit & start != 0:
-            complement = bit
-    return start + complement
+            return start + bit
+    return start
 
 # Generates all intermediates for a start and end timestamp, based on a root key.
+# These allow the decoder to compute values after the start timestamp without needing the root key,
+# since each one allows for one more 1 bit to be turned off.
 def get_intermediates(start, end, root):
     intermediates = {}
     if start == 0:

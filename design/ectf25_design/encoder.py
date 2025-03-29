@@ -18,7 +18,8 @@ def compress(n, section):
     compressed = int.from_bytes(blake3(section.to_bytes(1, byteorder="big")).update(n.to_bytes(16, byteorder="big")).digest()) & (2 ** 128 - 1)
     return compressed
 
-# Compresses the root for each section starting from highest to lowest
+# Compresses the root for each section matching the target, starting from highest to lowest.
+# Since we only have one root key, nothing needs to be done about the bit setup.
 def wind_encoder(root, target):
     result = root
     for section in range(64, -1, -1):
